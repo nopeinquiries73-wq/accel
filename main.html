@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>accel</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #0d0d0d;
+            /* Subtle dark gradients to enhance the background blur effect */
+            background-image: 
+                radial-gradient(at 20% 20%, #1a1a1a 0px, transparent 50%),
+                radial-gradient(at 80% 80%, #262626 0px, transparent 50%);
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 40px 60px;
+            text-align: center;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -0.05em;
+            color: #ffffff;
+            margin-bottom: 24px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .download-btn {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.07);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            color: #ffffff;
+            text-decoration: none;
+            padding: 12px 32px;
+            font-size: 1rem;
+            font-weight: 500;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        .download-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+        }
+        .download-btn:active {
+            background: rgba(255, 255, 255, 0.04);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="glass-card">
+        <h1>accel</h1>
+        <a href="https://accel.com" class="download-btn">Download</a>
+    </div>
+
+</body>
+</html>
