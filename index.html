@@ -3,75 +3,242 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>accel</title>
+    <title>accel — precision tool</title>
     <style>
+        :root {
+            --bg: #0d0d0d;
+            --panel: rgba(255,255,255,0.03);
+            --border: rgba(255,255,255,0.08);
+            --text: #e0e0e0;
+            --text-bright: #ffffff;
+            --accent: #7fd99a;
+        }
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
         body {
-            background-color: #0d0d0d;
-            background-image: 
-                radial-gradient(at 20% 20%, #1a1a1a 0px, transparent 50%),
-                radial-gradient(at 80% 80%, #262626 0px, transparent 50%);
-            color: #e0e0e0;
+            background-color: var(--bg);
+            background-image:
+                radial-gradient(at 20% 0%, #1a1a1a 0px, transparent 50%),
+                radial-gradient(at 100% 100%, #262626 0px, transparent 50%);
+            color: var(--text);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            min-height: 100vh;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
-            height: 100vh;
+            padding: 2rem;
+            line-height: 1.5;
+        }
+        .wrap {
+            max-width: 920px;
+            width: 100%;
         }
         .glass-card {
-            background: rgba(255, 255, 255, 0.03);
+            background: var(--panel);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 16px;
-            padding: 40px 60px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 3rem 3.5rem;
             text-align: center;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            box-shadow: 0 18px 50px rgba(0,0,0,0.5);
+            margin-bottom: 2rem;
+        }
+        .badge {
+            display: inline-block;
+            background: rgba(127,217,154,0.08);
+            border: 1px solid rgba(127,217,154,0.25);
+            color: var(--accent);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 1.5rem;
         }
         h1 {
-            font-size: 2.5rem;
+            font-size: 4rem;
             font-weight: 700;
             letter-spacing: -0.05em;
-            color: #ffffff;
-            margin-bottom: 24px;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            color: var(--text-bright);
+            margin-bottom: 1rem;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+        .subtitle {
+            font-size: 1.1rem;
+            color: rgba(255,255,255,0.55);
+            margin-bottom: 2.5rem;
         }
         .download-btn {
             display: inline-block;
-            background: rgba(255, 255, 255, 0.07);
+            background: rgba(255,255,255,0.07);
             backdrop-filter: blur(4px);
             -webkit-backdrop-filter: blur(4px);
-            color: #ffffff;
+            color: var(--text-bright);
             text-decoration: none;
-            padding: 12px 32px;
+            padding: 14px 36px;
             font-size: 1rem;
             font-weight: 500;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
             transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
         .download-btn:hover {
-            background: rgba(255, 255, 255, 0.15);
-            border-color: rgba(255, 255, 255, 0.2);
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
-            cursor: pointer;
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.22);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+            transform: translateY(-1px);
         }
         .download-btn:active {
-            background: rgba(255, 255, 255, 0.04);
+            transform: translateY(0);
+            background: rgba(255,255,255,0.04);
+        }
+        .section {
+            background: var(--panel);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+        .section h2 {
+            color: var(--text-bright);
+            font-size: 1.5rem;
+            margin-bottom: 1.25rem;
+            letter-spacing: -0.02em;
+        }
+        .section p, .section li {
+            color: rgba(255,255,255,0.65);
+            font-size: 0.95rem;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .feature {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 1.25rem;
+            text-align: center;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .feature:hover {
+            background: rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.12);
+        }
+        .feature .icon {
+            font-size: 1.8rem;
+            margin-bottom: 0.5rem;
+        }
+        .feature h3 {
+            color: var(--text-bright);
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+        .feature p {
+            font-size: 0.85rem;
+            color: rgba(255,255,255,0.5);
+        }
+        ol, ul {
+            margin-left: 1.25rem;
+            margin-top: 0.75rem;
+        }
+        li {
+            margin-bottom: 0.5rem;
+        }
+        .footer {
+            text-align: center;
+            color: rgba(255,255,255,0.3);
+            font-size: 0.8rem;
+            padding: 1.5rem 0 0;
+        }
+        @media (max-width: 600px) {
+            .glass-card {
+                padding: 2rem 1.5rem;
+            }
+            h1 {
+                font-size: 2.5rem;
+            }
+            .features {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
+    <div class="wrap">
+        <!-- Hero -->
+        <div class="glass-card">
+            <span class="badge">v5.2 available</span>
+            <h1>accel</h1>
+            <p class="subtitle">Precision tool for veck.io and buildnow.gg. Simple, fast, effective.</p>
+            <a href="https://accel-vzc6.onrender.com/Accel.zip" class="download-btn" download>Download Extension</a>
+        </div>
 
-    <div class="glass-card">
-        <h1>accel</h1>
-        <a href="https://accel-vzc6.onrender.com/accel-extension.zip" class="download-btn" download>Download</a>
+        <!-- Features -->
+        <div class="section">
+            <h2>What's inside</h2>
+            <div class="features">
+                <div class="feature">
+                    <div class="icon">🎯</div>
+                    <h3>Target Assist</h3>
+                    <p>Adjustable smoothness, hold-to-aim, and prediction.</p>
+                </div>
+                <div class="feature">
+                    <div class="icon">⚡</div>
+                    <h3>Trigger Logic</h3>
+                    <p>Auto fire with distance and delay control.</p>
+                </div>
+                <div class="feature">
+                    <div class="icon">👁</div>
+                    <h3>Streamer Mode</h3>
+                    <p>Hide visual indicators with one click.</p>
+                </div>
+                <div class="feature">
+                    <div class="icon">🚀</div>
+                    <h3>FPS Boost</h3>
+                    <p>Resolution scaling and unlock options.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Install -->
+        <div class="section">
+            <h2>Installation</h2>
+            <ol>
+                <li>Download the extension ZIP from the button above.</li>
+                <li>Extract the ZIP to a folder.</li>
+                <li>Open <strong>chrome://extensions</strong> in Chrome.</li>
+                <li>Enable <strong>Developer mode</strong> (top right).</li>
+                <li>Click <strong>Load unpacked</strong> and select the extracted folder.</li>
+                <li>Open veck.io or buildnow.gg, then press the extension icon to manage.</li>
+            </ol>
+        </div>
+
+        <!-- FAQ -->
+        <div class="section">
+            <h2>Common questions</h2>
+            <ul>
+                <li><strong>Will it work after updates?</strong> — The core is designed to adapt to minor site changes.</li>
+                <li><strong>How do I open settings?</strong> — Press the <code>"</code> key on the target page.</li>
+                <li><strong>Does it store data?</strong> — Settings are saved locally in your browser.</li>
+                <li><strong>Which browsers are supported?</strong> — Chrome and any Chromium-based browser with extension support.</li>
+            </ul>
+        </div>
+
+        <div class="footer">
+            accel — built for speed. Not affiliated with any target website.
+        </div>
     </div>
-
 </body>
 </html>
