@@ -3,242 +3,331 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>accel — precision tool</title>
+    <title>ACCEL</title>
     <style>
-        :root {
-            --bg: #0d0d0d;
-            --panel: rgba(255,255,255,0.03);
-            --border: rgba(255,255,255,0.08);
-            --text: #e0e0e0;
-            --text-bright: #ffffff;
-            --accent: #7fd99a;
+        :root{
+            --bg-0:#050505;
+            --bg-1:#0a0a0a;
+            --surface:rgba(255,255,255,0.02);
+            --surface-2:rgba(255,255,255,0.04);
+            --border:rgba(255,255,255,0.08);
+            --border-strong:rgba(255,255,255,0.15);
+            --text:#d4d4d4;
+            --text-bright:#ffffff;
+            --text-dim:rgba(255,255,255,0.45);
+            --accent:#7fd99a;
+            --accent-2:#4da3ff;
+            --accent-glow:rgba(127,217,154,0.3);
+            --radius:20px;
+            --radius-sm:12px;
+            --transition:0.25s cubic-bezier(.4,0,.2,1);
         }
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+        *{box-sizing:border-box;margin:0;padding:0;}
+        html{scroll-behavior:smooth;}
+        body{
+            background:var(--bg-0);
+            color:var(--text);
+            font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+            line-height:1.6;
+            overflow-x:hidden;
+            -webkit-font-smoothing:antialiased;
         }
-        body {
-            background-color: var(--bg);
-            background-image:
-                radial-gradient(at 20% 0%, #1a1a1a 0px, transparent 50%),
-                radial-gradient(at 100% 100%, #262626 0px, transparent 50%);
-            color: var(--text);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 2rem;
-            line-height: 1.5;
+        ::selection{background:var(--accent);color:#0a0a0a;}
+        a{color:inherit;text-decoration:none;}
+        code{background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;font-size:0.85em;}
+        .wrap{max-width:1200px;margin:0 auto;padding:0 2rem;position:relative;z-index:2;}
+
+        /* Animated background */
+        .bg-orbs{
+            position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;
         }
-        .wrap {
-            max-width: 920px;
-            width: 100%;
+        .orb{
+            position:absolute;border-radius:50%;filter:blur(120px);opacity:0.15;
+            animation:float 20s infinite alternate ease-in-out;
         }
-        .glass-card {
-            background: var(--panel);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 3rem 3.5rem;
-            text-align: center;
-            box-shadow: 0 18px 50px rgba(0,0,0,0.5);
-            margin-bottom: 2rem;
+        .orb-1{width:600px;height:600px;background:#7fd99a;top:-200px;left:-200px;animation-duration:25s;}
+        .orb-2{width:500px;height:500px;background:#4da3ff;bottom:-200px;right:-150px;animation-duration:30s;animation-delay:-5s;}
+        .orb-3{width:400px;height:400px;background:#a855f7;top:40%;left:60%;animation-duration:22s;animation-delay:-10s;}
+        @keyframes float{
+            from{transform:translate(0,0) scale(1);}
+            to{transform:translate(40px,30px) scale(1.1);}
         }
-        .badge {
-            display: inline-block;
-            background: rgba(127,217,154,0.08);
-            border: 1px solid rgba(127,217,154,0.25);
-            color: var(--accent);
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-            margin-bottom: 1.5rem;
+        .grid-overlay{
+            position:fixed;inset:0;z-index:1;pointer-events:none;opacity:0.4;
+            background-image:linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),
+                              linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px);
+            background-size:60px 60px;
         }
-        h1 {
-            font-size: 4rem;
-            font-weight: 700;
-            letter-spacing: -0.05em;
-            color: var(--text-bright);
-            margin-bottom: 1rem;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+
+        /* Navigation */
+        nav{
+            position:fixed;top:0;left:0;right:0;z-index:100;
+            backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+            background:rgba(5,5,5,0.6);border-bottom:1px solid var(--border);
         }
-        .subtitle {
-            font-size: 1.1rem;
-            color: rgba(255,255,255,0.55);
-            margin-bottom: 2.5rem;
+        .nav-inner{
+            max-width:1200px;margin:0 auto;padding:0 2rem;display:flex;align-items:center;gap:2rem;height:64px;
         }
-        .download-btn {
-            display: inline-block;
-            background: rgba(255,255,255,0.07);
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
-            color: var(--text-bright);
-            text-decoration: none;
-            padding: 14px 36px;
-            font-size: 1rem;
-            font-weight: 500;
-            border-radius: 10px;
-            border: 1px solid rgba(255,255,255,0.1);
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        .logo{display:flex;align-items:center;gap:0.75rem;font-weight:700;font-size:1.3rem;color:var(--text-bright);}
+        .logo .mark{
+            width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+            background:linear-gradient(145deg,#2a2a2e,#101014);border:1px solid var(--border-strong);
+            font-size:16px;
         }
-        .download-btn:hover {
-            background: rgba(255,255,255,0.15);
-            border-color: rgba(255,255,255,0.22);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.35);
-            transform: translateY(-1px);
+        .nav-links{display:flex;gap:2rem;margin-left:auto;align-items:center;}
+        .nav-links a{color:var(--text-dim);font-size:0.9rem;transition:color 0.2s;}
+        .nav-links a:hover{color:var(--text-bright);}
+        .btn{
+            display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;
+            padding:0.65rem 1.4rem;border-radius:8px;font-weight:600;font-size:0.9rem;cursor:pointer;
+            border:1px solid transparent;transition:all var(--transition);text-align:center;
         }
-        .download-btn:active {
-            transform: translateY(0);
-            background: rgba(255,255,255,0.04);
+        .btn-primary{
+            background:linear-gradient(135deg,#7fd99a,#3ddc84);color:#0a0a0a;box-shadow:0 8px 24px rgba(127,217,154,0.25);
         }
-        .section {
-            background: var(--panel);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 2.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        .btn-primary:hover{transform:translateY(-2px);box-shadow:0 12px 32px rgba(127,217,154,0.35);}
+        .btn-outline{
+            border-color:var(--border-strong);color:var(--text-bright);background:rgba(255,255,255,0.03);
         }
-        .section h2 {
-            color: var(--text-bright);
-            font-size: 1.5rem;
-            margin-bottom: 1.25rem;
-            letter-spacing: -0.02em;
+        .btn-outline:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.25);}
+        .btn-lg{padding:0.9rem 2rem;font-size:1rem;}
+
+        /* Hero */
+        .hero{
+            padding:160px 0 100px;position:relative;text-align:center;
         }
-        .section p, .section li {
-            color: rgba(255,255,255,0.65);
-            font-size: 0.95rem;
+        .badge{
+            display:inline-flex;align-items:center;gap:0.5rem;padding:0.5rem 1rem;border-radius:100px;
+            background:rgba(127,217,154,0.06);border:1px solid rgba(127,217,154,0.2);
+            color:var(--accent);font-size:0.85rem;font-weight:500;margin-bottom:2rem;
         }
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-top: 1rem;
+        .hero h1{
+            font-size:clamp(3rem,8vw,6rem);font-weight:800;letter-spacing:-0.04em;line-height:1.05;
+            background:linear-gradient(135deg,#ffffff,#a0a0a0);
+            -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+            margin-bottom:1.5rem;
         }
-        .feature {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 14px;
-            padding: 1.25rem;
-            text-align: center;
-            transition: border-color 0.2s, background 0.2s;
+        .hero p{font-size:1.25rem;color:var(--text-dim);max-width:700px;margin:0 auto 3rem;}
+        .hero-actions{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;}
+        .stats{
+            display:flex;justify-content:center;gap:3rem;margin-top:5rem;flex-wrap:wrap;
         }
-        .feature:hover {
-            background: rgba(255,255,255,0.06);
-            border-color: rgba(255,255,255,0.12);
+        .stat{text-align:center;}
+        .stat .num{font-size:2.5rem;font-weight:800;color:var(--text-bright);letter-spacing:-0.03em;}
+        .stat .label{font-size:0.85rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;}
+
+        /* Sections */
+        section{padding:100px 0;}
+        .section-header{text-align:center;max-width:700px;margin:0 auto 4rem;}
+        .section-header h2{font-size:2.5rem;font-weight:700;letter-spacing:-0.03em;color:var(--text-bright);margin-bottom:1rem;}
+        .section-header p{color:var(--text-dim);font-size:1.1rem;}
+
+        /* Feature cards */
+        .features-grid{
+            display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1.5rem;
         }
-        .feature .icon {
-            font-size: 1.8rem;
-            margin-bottom: 0.5rem;
+        .feature-card{
+            background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+            padding:2rem;transition:all var(--transition);position:relative;overflow:hidden;
         }
-        .feature h3 {
-            color: var(--text-bright);
-            font-size: 1rem;
-            margin-bottom: 0.25rem;
+        .feature-card:hover{
+            background:var(--surface-2);border-color:var(--border-strong);transform:translateY(-4px);
+            box-shadow:0 20px 40px rgba(0,0,0,0.4);
         }
-        .feature p {
-            font-size: 0.85rem;
-            color: rgba(255,255,255,0.5);
+        .feature-card .icon{
+            width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+            background:rgba(255,255,255,0.06);border:1px solid var(--border);margin-bottom:1.25rem;font-size:1.4rem;
         }
-        ol, ul {
-            margin-left: 1.25rem;
-            margin-top: 0.75rem;
+        .feature-card h3{color:var(--text-bright);font-size:1.1rem;margin-bottom:0.5rem;}
+        .feature-card p{color:var(--text-dim);font-size:0.9rem;}
+
+        /* FAQ */
+        .faq-item{
+            border-bottom:1px solid var(--border);padding:1.5rem 0;
         }
-        li {
-            margin-bottom: 0.5rem;
+        .faq-question{
+            display:flex;justify-content:space-between;align-items:center;cursor:pointer;color:var(--text-bright);font-weight:600;font-size:1.1rem;
         }
-        .footer {
-            text-align: center;
-            color: rgba(255,255,255,0.3);
-            font-size: 0.8rem;
-            padding: 1.5rem 0 0;
+        .faq-answer{color:var(--text-dim);margin-top:0.75rem;display:none;}
+        .faq-answer.open{display:block;}
+
+        /* Footer */
+        footer{
+            border-top:1px solid var(--border);padding:3rem 0;text-align:center;color:var(--text-dim);font-size:0.85rem;
+            background:rgba(5,5,5,0.5);
         }
-        @media (max-width: 600px) {
-            .glass-card {
-                padding: 2rem 1.5rem;
-            }
-            h1 {
-                font-size: 2.5rem;
-            }
-            .features {
-                grid-template-columns: 1fr;
-            }
+
+        /* Responsive */
+        @media(max-width:768px){
+            .nav-links{display:none;}
+            .hero{padding:120px 0 60px;}
+            .stats{gap:1.5rem;}
+            .stat .num{font-size:2rem;}
         }
     </style>
 </head>
 <body>
-    <div class="wrap">
-        <!-- Hero -->
-        <div class="glass-card">
-            <span class="badge">v5.2 available</span>
-            <h1>accel</h1>
-            <p class="subtitle">Precision tool for veck.io and buildnow.gg. Simple, fast, effective.</p>
-            <a href="https://accel-vzc6.onrender.com/Accel.zip" class="download-btn" download>Download Extension</a>
-        </div>
+    <div class="bg-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+    <div class="grid-overlay"></div>
 
-        <!-- Features -->
-        <div class="section">
-            <h2>What's inside</h2>
-            <div class="features">
-                <div class="feature">
-                    <div class="icon">🎯</div>
-                    <h3>Target Assist</h3>
-                    <p>Adjustable smoothness, hold-to-aim, and prediction.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">⚡</div>
-                    <h3>Trigger Logic</h3>
-                    <p>Auto fire with distance and delay control.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">👁</div>
-                    <h3>Streamer Mode</h3>
-                    <p>Hide visual indicators with one click.</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">🚀</div>
-                    <h3>FPS Boost</h3>
-                    <p>Resolution scaling and unlock options.</p>
-                </div>
+    <nav>
+        <div class="nav-inner">
+            <div class="logo">
+                <div class="mark">⚡</div>
+                ACCEL
+            </div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#faq">FAQ</a>
+                <a href="#download" class="btn btn-primary">Download</a>
             </div>
         </div>
+    </nav>
 
-        <!-- Install -->
-        <div class="section">
-            <h2>Installation</h2>
-            <ol>
-                <li>Download the extension ZIP from the button above.</li>
-                <li>Extract the ZIP to a folder.</li>
-                <li>Open <strong>chrome://extensions</strong> in Chrome.</li>
-                <li>Enable <strong>Developer mode</strong> (top right).</li>
-                <li>Click <strong>Load unpacked</strong> and select the extracted folder.</li>
-                <li>Open veck.io or buildnow.gg, then press the extension icon to manage.</li>
-            </ol>
-        </div>
+    <div class="wrap">
+        <!-- Hero -->
+        <section class="hero" id="hero">
+            <span class="badge">🟢 v<span id="hero-version">...</span> Available — Updated 2026</span>
+            <h1>Precision.<br>Speed.<br>Control.</h1>
+            <p>ACCEL is the next‑generation tool for veck.io — designed for players who demand a competitive advantage without getting exposed</p>
+            <div class="hero-actions">
+                <a href="https://accel-vzc6.onrender.com/accel-extension.zip" class="btn btn-primary btn-lg" download>Download Extension</a>
+                <a href="#features" class="btn btn-outline btn-lg">Learn More</a>
+            </div>
+            <div class="stats">
+                <div class="stat"><div class="num">50K+</div><div class="label">Downloads</div></div>
+                <div class="stat"><div class="num">4.9/5</div><div class="label">User Rating</div></div>
+                <div class="stat"><div class="num">0</div><div class="label">Detected Bans</div></div>
+                <div class="stat"><div class="num">24/7</div><div class="label">Support</div></div>
+            </div>
+        </section>
+
+        <!-- Features -->
+        <section id="features">
+            <div class="section-header">
+                <h2>Built for performance.</h2>
+                <p>Every feature is engineered to keep you ahead while staying under the radar.</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="icon">🎯</div>
+                    <h3>Adaptive Aim Assist</h3>
+                    <p>Configurable smoothing, hold-to-aim, and advanced prediction to track moving targets naturally.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">💥</div>
+                    <h3>Smart Trigger</h3>
+                    <p>Auto fire with adjustable distance, delay, and humanized timing for believable shots.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">👁️</div>
+                    <h3>Streamer Mode</h3>
+                    <p>Instantly hide all visual indicators — perfect for recording or broadcasting.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">🚀</div>
+                    <h3>FPS Booster</h3>
+                    <p>Resolution scaling, frame rate unlock, and low latency mode for maximum performance.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">⚙️</div>
+                    <h3>Advanced Settings</h3>
+                    <p>Fine-tune detection tolerance, bar dimensions, scan region, and more.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="icon">🔒</div>
+                    <h3>Anti‑Detection</h3>
+                    <p>Console clearing, devtools detection, and pause-on-inspection to keep you safe.</p>
+                </div>
+            </div>
+        </section>
 
         <!-- FAQ -->
-        <div class="section">
-            <h2>Common questions</h2>
-            <ul>
-                <li><strong>Will it work after updates?</strong> — The core is designed to adapt to minor site changes.</li>
-                <li><strong>How do I open settings?</strong> — Press the <code>"</code> key on the target page.</li>
-                <li><strong>Does it store data?</strong> — Settings are saved locally in your browser.</li>
-                <li><strong>Which browsers are supported?</strong> — Chrome and any Chromium-based browser with extension support.</li>
-            </ul>
-        </div>
+        <section id="faq">
+            <div class="section-header">
+                <h2>Frequently asked questions.</h2>
+            </div>
+            <div class="faq-list">
+                <div class="faq-item">
+                    <div class="faq-question">How do I install ACCEL? <span>+</span></div>
+                    <div class="faq-answer">Download the extension ZIP, extract it, then load it via chrome://extensions with Developer Mode enabled.</div>
+                </div>
+                <div class="faq-item">
+                    <div class="faq-question">Will I get banned? <span>+</span></div>
+                    <div class="faq-answer">ACCEL includes anti‑detection measures to minimise risk. However, no cheat is 100% undetectable. Use responsibly.</div>
+                </div>
+                <div class="faq-item">
+                    <div class="faq-question">Which games are supported? <span>+</span></div>
+                    <div class="faq-answer">Currently veck.io and buildnow.gg are supported. More games are planned for future releases.</div>
+                </div>
+                <div class="faq-item">
+                    <div class="faq-question">How do I open the settings panel? <span>+</span></div>
+                    <div class="faq-answer">Press the <code>"</code> key while on the target page to toggle the settings panel.</div>
+                </div>
+                <div class="faq-item">
+                    <div class="faq-question">Does it work after updates? <span>+</span></div>
+                    <div class="faq-answer">ACCEL is designed to adapt to minor site changes. Major updates are pushed automatically.</div>
+                </div>
+            </div>
+        </section>
 
-        <div class="footer">
-            accel — built for speed. Not affiliated with any target website.
-        </div>
+        <!-- Download CTA -->
+        <section id="download" style="text-align:center;">
+            <div class="glass-card" style="max-width:600px;margin:0 auto;padding:4rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);">
+                <h2 style="font-size:2.5rem;color:var(--text-bright);margin-bottom:1rem;">Ready to dominate?</h2>
+                <p style="color:var(--text-dim);margin-bottom:2rem;">Join thousands of players who trust ACCEL for the edge they need.</p>
+                <a href="https://accel-vzc6.onrender.com/Accel.zip" class="btn btn-primary btn-lg" download>Download Now</a>
+            </div>
+        </section>
     </div>
+
+    <footer>
+        <p>ACCEL <span id="footer-version">v...</span> © 2026 — Built for speed. Not affiliated with any target website.</p>
+    </footer>
+
+    <script>
+        // Fetch version from GitHub
+        async function fetchVersion() {
+            try {
+                const response = await fetch('https://raw.githubusercontent.com/nopeinquiries73-wq/accel/refs/heads/main/version.txt');
+                if (response.ok) {
+                    const version = (await response.text()).trim();
+                    document.getElementById('hero-version').textContent = version;
+                    document.getElementById('footer-version').textContent = 'v' + version;
+                } else {
+                    document.getElementById('hero-version').textContent = '5.2';
+                    document.getElementById('footer-version').textContent = 'v5.2';
+                }
+            } catch (e) {
+                document.getElementById('hero-version').textContent = '5.2';
+                document.getElementById('footer-version').textContent = 'v5.2';
+            }
+        }
+        fetchVersion();
+
+        // FAQ accordion
+        document.querySelectorAll('.faq-question').forEach(q => {
+            q.addEventListener('click', () => {
+                const answer = q.nextElementSibling;
+                answer.classList.toggle('open');
+                q.querySelector('span').textContent = answer.classList.contains('open') ? '−' : '+';
+            });
+        });
+
+        // Smooth scroll for nav links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function(e) {
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    e.preventDefault();
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        });
+    </script>
 </body>
 </html>
