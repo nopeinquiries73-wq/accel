@@ -2,12 +2,13 @@
     'use strict';
 
     /* ═══════════════════════════════════════════════════════════════
-       ACCEL v14
-       · aim: absolute-target exponential lerp, dt-normalized
-       · deadzone + velocity cap → no micro-jitter, no overshoot
-       · recoil decoupled: aim contribution subtracted from recoil delta
-       · menu: class-based premium rebuild (segmented tabs, sections,
-         pill values, spring toggles, sliders with fill + badge)
+       ACCEL v15
+       · PERF tab: render-scale, shadow/AA/fog/particle kill, adaptive
+         governor, resolution clamps, PixelRatio cap
+       · Target position 2nd-stage filter → kills final shake
+       · Skeleton per-limb colors
+       · Reset / Export / Import settings
+       · Menu shell: glass panels, hover elevation, micro-anims
        ═══════════════════════════════════════════════════════════════ */
 
     // ─── ANTI-DETECT FOUNDATION ─────────────────────────────
@@ -43,41 +44,77 @@
     }, true);
 
     const PI2 = Math.PI * 2;
-    function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+    const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
 
     // ─── CONFIG ─────────────────────────────────────────────
     const DEFAULTS = {
+        // aim
         aimbot:true, softAim:false, silentAim:false, lockMode:false,
         aimKey:'right', aimFov:1.4, smoothing:0.55,
         aimBone:'head', targetPriority:'fov',
         camOffset:6.0, aimOffset:14.9, pitchMax:1.48,
         aimDeadzone:0.0035, aimMaxVel:6.0,
+        targetFilter:true, targetFilterStrength:0.35,
         softStrength:0.35, softJitter:0.5, softMissChance:0.03, softRampFrames:6,
         prediction:true, predictionStrength:0.6, velocitySmoothing:0.82,
         latencyComp:60, bulletSpeed:900, accelComp:true, predictionMaxOffset:8.0,
+        // trigger
         autoShoot:true, triggerDelay:150, burstLength:3, burstPause:200,
         hitSound:false, hitSoundVolume:0.5,
+        // anti-recoil
         antiRecoil:true, recoilMode:'blend', recoilStrength:0.85,
         recoilAdaptiveW:0.4, recoilPatternW:0.4, recoilPredictW:0.2,
         recoilCompX:1.0, recoilCompY:1.0, recoilSmooth:0.7,
+        // bhop
         autoBhop:true, bhopStrength:7.5,
+        // team
         forceTeam:0, antiTeamLock:true,
+        // esp
         espEnabled:true, drawFov:true, fovColor:'#7c5cff',
         drawLines:true, snaplineOrigin:'bottom',
         showDist:true, maxDistShow:150, boxThickness:1.5,
         espFade:false, espFadeDist:120,
+        // skeleton
         skeletonESP:true, skeletonThickness:1.6, skeletonJointSize:2.6,
-        skeletonColor:'#00e0c6',
         skeletonHead:true, skeletonTorso:true, skeletonArms:true, skeletonLegs:true,
         skeletonSmooth:0.55, skeletonMinConf:0.35, skeletonFill:true,
+        skeletonColor:'#00e0c6',
+        skeletonHeadColor:'#00e0c6',
+        skeletonTorsoColor:'#7c5cff',
+        skeletonArmColor:'#fdcb6e',
+        skeletonLegColor:'#ff5566',
+        skeletonPerLimbColor:false,
+        // radar
         radarEnabled:true, radarSize:140, radarRange:100, stealthMode:true,
+        // wallbang
         wallBang:true, forceWallBang:false, wallBangMaxDist:150, rageMode:false,
         wallbangColor:'#ff66ff', wallbangTracer:true, wallbangWindow:220,
+        // crosshair
         crosshair:false, crosshairStyle:'cross', crosshairSize:8, crosshairColor:'#00e0c6',
+        // anti-detect
         maxStealth:true, jitterInput:false, jitterAmount:1.5,
         encryptStorage:true, spoofToString:true,
+        // ── PERF ──
+        perfEnabled:true,
+        perfRenderScale:1.0,        // 0.4 – 1.0 (canvas render resolution)
+        perfPixelRatioCap:1.0,      // 0.5 – 2.0
+        perfDisableShadows:true,
+        perfDisableMSAA:true,
+        perfDisableFog:false,
+        perfDisableParticles:false,
+        perfCullLights:false,
+        perfCullStatic:true,
+        perfTextureQuality:1,       // 0 = low, 1 = auto, 2 = high
+        perfAnisoMax:4,             // 0 = off, 1, 2, 4, 8, 16
+        perfPowerPref:'high-performance',
+        perfAdaptive:true,
+        perfTargetFps:144,
+        perfMinScale:0.6,
+        perfMaxScale:1.0,
+        perfFrameCap:0,             // 0 = uncapped
+        perfShowOverlay:false,
     };
-    const STORAGE_KEY = 'accel_krunker_v14';
+    const STORAGE_KEY = 'accel_krunker_v15';
     const _XOR = 0x5B;
     const _xor = (s) => { let o = ''; for (let i = 0; i < s.length; i++) o += String.fromCharCode(s.charCodeAt(i) ^ _XOR); return o; };
     const _enc = (s) => { try { return btoa(_xor(s)); } catch(_) { return null; } };
@@ -98,9 +135,46 @@
             localStorage.setItem(STORAGE_KEY, val || raw);
         } catch(_) {}
     }
+    function resetSettings() {
+        settings = { ...DEFAULTS };
+        saveSettings();
+        location.reload();
+    }
+    function exportSettings() {
+        try {
+            const raw = JSON.stringify(settings, null, 2);
+            const blob = new Blob([raw], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `accel_v15_${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch(_) {}
+    }
+    function importSettings() {
+        try {
+            const inp = document.createElement('input');
+            inp.type = 'file'; inp.accept = '.json,application/json';
+            inp.onchange = (e) => {
+                const f = e.target.files && e.target.files[0]; if (!f) return;
+                const r = new FileReader();
+                r.onload = () => {
+                    try {
+                        const parsed = JSON.parse(r.result);
+                        settings = { ...DEFAULTS, ...parsed };
+                        saveSettings();
+                        location.reload();
+                    } catch(_) { alert('bad config'); }
+                };
+                r.readAsText(f);
+            };
+            inp.click();
+        } catch(_) {}
+    }
 
     // ─── STATE ──────────────────────────────────────────────
     let scene=null, myPlayer=null, camera=null, Vector3=null;
+    let renderer=null;
     let lockedTarget=null, keys={};
     let mouseButtons={0:false,1:false,2:false};
     let isHooked=false, lastShootTime=0, lastManualShot=0;
@@ -119,10 +193,21 @@
     const camWorld = { x:0, y:0, z:0 };
     const trackState = new WeakMap();
     const scratch = { v1:null };
+    let lastAimYawDelta = 0, lastAimPitchDelta = 0;
 
-    // Aim state — for decoupling recoil from aim motion
-    let lastAimYawDelta = 0;
-    let lastAimPitchDelta = 0;
+    // Perf state
+    const perfState = {
+        appliedScale: 1.0,
+        fpsHistory: [],
+        lastAdjust: 0,
+        originalSetPixelRatio: null,
+        originalSetSize: null,
+        originalShadowMap: null,
+        shadowTargets: [],
+        savedRendererState: null,
+        perfFrameCap: 0,
+        lastRenderTime: 0,
+    };
 
     // ─── HOOK ───────────────────────────────────────────────
     const originalPush = Array.prototype.push;
@@ -134,6 +219,9 @@
                     scene = obj.parent;
                     if (obj.position && obj.position.constructor) Vector3 = obj.position.constructor;
                     isHooked = true; raycastHooked = false;
+                    // Try to find the renderer via scene.userData or global refs
+                    findRenderer();
+                    if (settings.perfEnabled) applyPerf();
                 }
             }
         }
@@ -203,6 +291,30 @@
         } catch(_) {}
     }
 
+    /* ═══════════════════════════════════════════════════════════════
+       TARGET FILTER — 2nd stage. Smooths raw enemy position before
+       aim/prediction consume it. Kills residual per-frame shake.
+       ═══════════════════════════════════════════════════════════════ */
+    const filtState = new WeakMap();
+    function filterTargetPos(e, now) {
+        if (!settings.targetFilter) return { x: e.position.x, y: e.position.y, z: e.position.z };
+        let s = filtState.get(e);
+        if (!s) {
+            s = { x: e.position.x, y: e.position.y, z: e.position.z, t: now };
+            filtState.set(e, s);
+            return { x: s.x, y: s.y, z: s.z };
+        }
+        const dt = (now - s.t) / 1000;
+        if (dt < 0.0005 || dt > 0.3) { s.x = e.position.x; s.y = e.position.y; s.z = e.position.z; s.t = now; return { x: s.x, y: s.y, z: s.z }; }
+        const a = 1 - clamp(settings.targetFilterStrength, 0, 0.95);
+        // One-pole IIR — keeps real motion, kills single-frame noise
+        s.x = a * s.x + (1 - a) * e.position.x;
+        s.y = a * s.y + (1 - a) * e.position.y;
+        s.z = a * s.z + (1 - a) * e.position.z;
+        s.t = now;
+        return { x: s.x, y: s.y, z: s.z };
+    }
+
     // ─── PREDICTION ─────────────────────────────────────────
     function updateTrack(e, now) {
         let s = trackState.get(e);
@@ -219,10 +331,10 @@
         s.x=px; s.y=py; s.z=pz; s.time=now;
         return s;
     }
-    function predict(e, fx, fy, fz, now) {
-        if (!settings.prediction) return { x:e.position.x, y:e.position.y, z:e.position.z };
+    function predict(e, base, fx, fy, fz, now) {
+        if (!settings.prediction) return { x: base.x, y: base.y, z: base.z };
         const s = updateTrack(e, now);
-        const dx=e.position.x-fx, dy=e.position.y-fy, dz=e.position.z-fz;
+        const dx=base.x-fx, dy=base.y-fy, dz=base.z-fz;
         const d = Math.sqrt(dx*dx+dy*dy+dz*dz);
         const t = (d / (settings.bulletSpeed || 900)) + (settings.latencyComp / 1000);
         const tS = t * settings.predictionStrength;
@@ -232,7 +344,7 @@
         const cap = settings.predictionMaxOffset || 8;
         const mag = Math.sqrt(ox*ox+oy*oy+oz*oz);
         if (mag > cap) { const k = cap/mag; ox*=k; oy*=k; oz*=k; }
-        return { x:e.position.x+ox, y:e.position.y+oy, z:e.position.z+oz };
+        return { x:base.x+ox, y:base.y+oy, z:base.z+oz };
     }
     const BONE_Y = { head:10.2, neck:9.2, chest:7.8, pelvis:5.4 };
     const boneY = (b) => BONE_Y[b] === undefined ? settings.aimOffset : BONE_Y[b];
@@ -339,7 +451,197 @@
     }
 
     /* ═══════════════════════════════════════════════════════════════
-       ANTI-RECOIL — 3-way blend (same as v13)
+       RENDERER DISCOVERY + PERF PIPELINE
+
+       We don't know where Krunker keeps its WebGLRenderer. Strategy:
+         1. Look at window.* for objects with .domElement === a canvas
+            and typical renderer methods (setPixelRatio, setSize, render).
+         2. Grab scene.userData.renderer if present.
+         3. Fall back to canvas.getContext('webgl2'/'webgl') param tweak.
+
+       Once found, we apply:
+         · setPixelRatio(cap)
+         · renderScale on setSize (canvas.width/height)
+         · disable shadowMap
+         · MSAA params via gl context
+         · optional: mask three.js Lights, Fog, ParticleSystems
+         · adaptive: monitor fps, adjust scale between min and max
+       ═══════════════════════════════════════════════════════════════ */
+    function findRenderer() {
+        if (renderer) return renderer;
+        try {
+            // window.scan for a three.js renderer
+            for (const k in window) {
+                try {
+                    const v = window[k];
+                    if (!v || typeof v !== 'object') continue;
+                    if (v.domElement && v.domElement.tagName === 'CANVAS'
+                        && typeof v.setPixelRatio === 'function'
+                        && typeof v.render === 'function') {
+                        renderer = v; return v;
+                    }
+                    // Three.js also commonly lives on window.THREE.<something>
+                    if (v.renderer && v.renderer.domElement
+                        && typeof v.renderer.setPixelRatio === 'function') {
+                        renderer = v.renderer; return v.renderer;
+                    }
+                } catch(_) {}
+            }
+        } catch(_) {}
+        try {
+            // Scan for canvas with a renderer in _gl or similar
+            const cs = document.querySelectorAll('canvas');
+            for (let i = 0; i < cs.length; i++) {
+                const c = cs[i];
+                if (c.__threeObj || c.__renderer) { renderer = c.__renderer || c.__threeObj; break; }
+            }
+        } catch(_) {}
+        return renderer;
+    }
+
+    function applyPerf() {
+        if (!settings.perfEnabled) return;
+        const r = findRenderer();
+        // PixelRatio cap
+        try {
+            if (r && typeof r.setPixelRatio === 'function') {
+                if (!perfState.originalSetPixelRatio) perfState.originalSetPixelRatio = r.setPixelRatio.bind(r);
+                const cap = clamp(settings.perfPixelRatioCap, 0.5, 3);
+                const dpr = Math.min(window.devicePixelRatio || 1, cap);
+                r.setPixelRatio(dpr);
+            }
+        } catch(_) {}
+        // Render scale on main canvas (also applies to CSS downscale later)
+        applyRenderScale();
+        // Shadow map
+        try {
+            if (r && r.shadowMap) {
+                if (!perfState.originalShadowMap) perfState.originalShadowMap = r.shadowMap.enabled;
+                r.shadowMap.enabled = !settings.perfDisableShadows;
+                if (!settings.perfDisableShadows) {
+                    // Soft shadows off in perf mode
+                }
+            }
+        } catch(_) {}
+        // MSAA via gl context — needs context recreation to change, so we
+        // prefer to just hint antialias:false at creation. If already created
+        // we disable via sample coverage if available.
+        try {
+            if (r && r.getContext && settings.perfDisableMSAA) {
+                const gl = r.getContext();
+                if (gl) {
+                    // No live toggle for MSAA, but cap samples on framebuffer
+                    try { gl.disable(gl.SAMPLE_ALPHA_TO_COVERAGE); } catch(_) {}
+                    try { gl.disable(gl.SAMPLE_COVERAGE); } catch(_) {}
+                }
+            }
+        } catch(_) {}
+        // Scene-wide: kill fog / particles / lights if requested
+        try {
+            if (scene) {
+                if (settings.perfDisableFog && scene.fog) scene.fog = null;
+                if (settings.perfDisableParticles || settings.perfCullLights) {
+                    scene.traverse(o => {
+                        if (!o) return;
+                        if (settings.perfDisableParticles) {
+                            if (o.type === 'Points' || o.type === 'ParticleSystem' || o.isPoints) {
+                                if (o.visible) { o.__perfHidden = true; o.visible = false; }
+                            }
+                        }
+                        if (settings.perfCullLights) {
+                            if (o.isLight || o.type === 'Light' || o.type === 'AmbientLight'
+                                || o.type === 'DirectionalLight' || o.type === 'PointLight'
+                                || o.type === 'SpotLight' || o.type === 'HemisphereLight') {
+                                if (o.visible && o.type !== 'AmbientLight' && o.type !== 'HemisphereLight') {
+                                    o.__perfHidden = true; o.visible = false;
+                                }
+                            }
+                        }
+                    });
+                }
+                // Power preference hint
+                try {
+                    if (r && r.getContext && settings.perfPowerPref) {
+                        // Can't change post-creation; store for reference
+                    }
+                } catch(_) {}
+            }
+        } catch(_) {}
+        // Frame cap
+        perfState.perfFrameCap = settings.perfFrameCap || 0;
+        // Overlay
+        const ov = document.getElementById('perfOverlay');
+        if (ov) ov.style.display = settings.perfShowOverlay ? 'block' : 'none';
+    }
+
+    function applyRenderScale() {
+        const scale = clamp(settings.perfRenderScale, 0.3, 1.0);
+        const w = window.innerWidth, h = window.innerHeight;
+        const tw = Math.max(2, Math.floor(w * scale));
+        const th = Math.max(2, Math.floor(h * scale));
+        try {
+            if (renderer && typeof renderer.setSize === 'function') {
+                // Only call when scale changes appreciably, to avoid resetting
+                // the game's own size logic every frame.
+                if (Math.abs(perfState.appliedScale - scale) > 0.001) {
+                    // Krunker sometimes re-calls setSize; we just nudge the canvas
+                }
+                // Directly resize canvas backing store — least intrusive
+                const c = renderer.domElement;
+                if (c) {
+                    if (c.width !== tw || c.height !== th) {
+                        c.width = tw; c.height = th;
+                        c.style.width = w + 'px';
+                        c.style.height = h + 'px';
+                    }
+                }
+            } else {
+                // We can still scale the game's main canvas if we can find it
+                const cs = document.querySelectorAll('canvas');
+                for (let i = 0; i < cs.length; i++) {
+                    const c = cs[i];
+                    if (c.id === ID.esp) continue;
+                    if (c.width === w || c.width >= w * 0.95) {
+                        // Heuristic: main game canvas
+                        if (Math.abs(perfState.appliedScale - scale) > 0.001) {
+                            c.width = tw; c.height = th;
+                            c.style.width = w + 'px';
+                            c.style.height = h + 'px';
+                            break;
+                        }
+                    }
+                }
+            }
+            perfState.appliedScale = scale;
+        } catch(_) {}
+    }
+
+    function perfTick(dtSec) {
+        if (!settings.perfEnabled) return;
+        if (!settings.perfAdaptive) return;
+        const now = performance.now();
+        // Sample FPS every 1 second and adjust scale
+        perfState.fpsHistory.push(fps);
+        if (perfState.fpsHistory.length > 3) perfState.fpsHistory.shift();
+        if (now - perfState.lastAdjust < 1500) return;
+        perfState.lastAdjust = now;
+        if (perfState.fpsHistory.length < 2) return;
+        const avg = perfState.fpsHistory.reduce((a,b)=>a+b,0) / perfState.fpsHistory.length;
+        const target = settings.perfTargetFps || 144;
+        let scale = settings.perfRenderScale;
+        if (avg < target - 10 && scale > settings.perfMinScale) {
+            scale = Math.max(settings.perfMinScale, scale - 0.05);
+        } else if (avg > target + 15 && scale < settings.perfMaxScale) {
+            scale = Math.min(settings.perfMaxScale, scale + 0.025);
+        }
+        if (Math.abs(scale - settings.perfRenderScale) > 0.005) {
+            settings.perfRenderScale = +scale.toFixed(3);
+            applyRenderScale();
+        }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       ANTI-RECOIL (unchanged)
        ═══════════════════════════════════════════════════════════════ */
     const Recoil = (() => {
         const patterns = Object.create(null);
@@ -365,11 +667,10 @@
             S.learn.active=false; S.learn.samples=[];
         }
         function getPattern() { return patterns[S.weapon] || DEF; }
-        // aimDeltaP/Y = the delta WE applied last frame for aim. Subtracted so recoil doesn't chase its own tail.
-        function step(curP, curY, aimDeltaP, aimDeltaY, opts) {
+        function step(curP, curY, aimDP, aimDY, opts) {
             if (!opts.enabled || !S.firing) { S.lastP=curP; S.lastY=curY; S.compP=0; S.compY=0; return null; }
-            let dP = (curP - S.lastP) - aimDeltaP;
-            let dY = (curY - S.lastY) - aimDeltaY;
+            let dP = (curP - S.lastP) - aimDP;
+            let dY = (curY - S.lastY) - aimDY;
             while (dY > Math.PI) dY -= PI2;
             while (dY < -Math.PI) dY += PI2;
             S.emaPrevP = S.emaP; S.emaPrevY = S.emaY;
@@ -402,7 +703,7 @@
     })();
 
     /* ═══════════════════════════════════════════════════════════════
-       SKELETON SOLVER (same pipeline as v13)
+       SKELETON (same pipeline, now with per-limb colors)
        ═══════════════════════════════════════════════════════════════ */
     const ANATOMY = { head:'neck', neck:'chest', chest:'pelvis', pelvis:null,
         lShoulder:'chest', lElbow:'lShoulder', lHand:'lElbow',
@@ -421,6 +722,15 @@
         if (k === 'leg') return settings.skeletonLegs;
         return true;
     }
+    function colorFor(s) {
+        if (!settings.skeletonPerLimbColor) return settings.skeletonColor;
+        const k = BONE_KIND[s];
+        if (k === 'head') return settings.skeletonHeadColor;
+        if (k === 'torso') return settings.skeletonTorsoColor;
+        if (k === 'arm') return settings.skeletonArmColor;
+        if (k === 'leg') return settings.skeletonLegColor;
+        return settings.skeletonColor;
+    }
     const RE = [
         [/head|skull/i,'head'], [/neck/i,'neck'],
         [/chest|torso|spine|upper[_-]?body/i,'chest'],
@@ -438,7 +748,7 @@
         [/(r|right)[_\-\.]?(knee|shin|lower[_-]?leg|calf)/i,'rKnee'],
         [/(r|right)[_\-\.]?(foot|ankle|boot)/i,'rFoot'],
     ];
-    function nameSlot(n) { if (!n) return null; for (let i = 0; i < RE.length; i++) if (RE[i][0].test(n)) return RE[i][1]; return null; }
+    const nameSlot = (n) => { if (!n) return null; for (let i = 0; i < RE.length; i++) if (RE[i][0].test(n)) return RE[i][1]; return null; };
     function spaceSlot(lx, ly) {
         const s = lx < -0.15 ? 'l' : lx > 0.15 ? 'r' : '';
         if (ly > 9.0) return 'head';
@@ -558,7 +868,6 @@
         if (vis < 3 || vis < tot * 0.25) return;
         ctx.save();
         ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.shadowColor = settings.skeletonColor;
         ctx.shadowBlur = 5;
         for (const s in ANATOMY) {
             const p = ANATOMY[s]; if (!p) continue;
@@ -566,15 +875,18 @@
             const a = scr[s], b = scr[p]; if (!a || !b) continue;
             const c = Math.min(a.conf, b.conf);
             ctx.globalAlpha = clamp(c, 0.3, 1.0);
-            ctx.strokeStyle = settings.skeletonColor;
+            ctx.strokeStyle = colorFor(s);
+            ctx.shadowColor = colorFor(s);
             ctx.lineWidth = settings.skeletonThickness * (0.7 + 0.3 * c);
             ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
         }
-        ctx.globalAlpha = 1; ctx.fillStyle = '#ffffff'; ctx.shadowBlur = 8;
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 8;
         const js = settings.skeletonJointSize;
         for (const s in scr) {
             const p = scr[s]; if (!p || !slotOn(s)) continue;
             ctx.globalAlpha = clamp(p.conf, 0.4, 1.0);
+            ctx.fillStyle = '#ffffff';
             ctx.beginPath(); ctx.arc(p.x, p.y, js * (0.6 + 0.4 * p.conf), 0, PI2); ctx.fill();
         }
         ctx.globalAlpha = 1; ctx.restore();
@@ -606,109 +918,124 @@
     }
 
     /* ═══════════════════════════════════════════════════════════════
-       PREMIUM UI — class-based rebuild
+       PREMIUM UI (glass shell v15)
        ═══════════════════════════════════════════════════════════════ */
     const CSS = `
     .acc-root, .acc-root *, .acc-root *::before, .acc-root *::after { box-sizing:border-box; }
     .acc-root {
-        --bg:#0a0c12;
-        --bg-2:#10131c;
-        --card:rgba(22,26,38,0.72);
-        --card-2:rgba(30,35,50,0.66);
+        --bg:#080a10;
+        --card:rgba(18,21,32,0.78);
+        --card-2:rgba(26,30,44,0.7);
         --rim:rgba(255,255,255,0.06);
-        --rim-2:rgba(255,255,255,0.10);
-        --text:#e8ebf5;
-        --text-2:rgba(232,235,245,0.62);
-        --text-3:rgba(232,235,245,0.34);
+        --rim-2:rgba(255,255,255,0.12);
+        --text:#e9ecf6;
+        --text-2:rgba(233,236,246,0.66);
+        --text-3:rgba(233,236,246,0.36);
         --accent:#7c5cff;
         --accent-2:#00e0c6;
         --danger:#ff5566;
         --warn:#fdcb6e;
-        --radius:20px;
-        --radius-sm:10px;
-        font-family:'Inter','Segoe UI',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+        --radius:22px;
+        font-family:'Inter','SF Pro Display','Segoe UI',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
         -webkit-font-smoothing:antialiased;
         font-feature-settings:'ss01','cv11';
         color:var(--text);
     }
     .acc-panel {
-        position:fixed; top:24px; right:24px; z-index:9999;
-        width:400px; max-height:88vh;
+        position:fixed; top:22px; right:22px; z-index:9999;
+        width:414px; max-height:90vh;
         display:flex; flex-direction:column; overflow:hidden;
         border-radius:var(--radius);
         background:
-            radial-gradient(120% 100% at 0% 0%, rgba(124,92,255,0.10), transparent 55%),
-            radial-gradient(120% 100% at 100% 100%, rgba(0,224,198,0.07), transparent 55%),
+            radial-gradient(140% 120% at 0% 0%, rgba(124,92,255,0.14), transparent 55%),
+            radial-gradient(140% 120% at 100% 100%, rgba(0,224,198,0.10), transparent 55%),
+            linear-gradient(180deg, rgba(255,255,255,0.035), transparent 40%),
             var(--card);
-        backdrop-filter:blur(28px) saturate(1.7);
-        -webkit-backdrop-filter:blur(28px) saturate(1.7);
+        backdrop-filter:blur(32px) saturate(1.8);
+        -webkit-backdrop-filter:blur(32px) saturate(1.8);
         border:1px solid var(--rim);
         box-shadow:
-            0 1px 0 0 rgba(255,255,255,0.04) inset,
-            0 30px 80px rgba(0,0,0,0.72),
-            0 8px 24px rgba(0,0,0,0.55);
-        transition:transform 0.42s cubic-bezier(0.34,1.4,0.64,1), opacity 0.28s ease, border-color 0.4s ease;
+            0 1px 0 0 rgba(255,255,255,0.05) inset,
+            0 0 0 0.5px rgba(255,255,255,0.02) inset,
+            0 40px 100px rgba(0,0,0,0.78),
+            0 12px 32px rgba(0,0,0,0.6);
+        transition:transform 0.44s cubic-bezier(0.34,1.42,0.64,1), opacity 0.26s ease, border-color 0.4s ease;
         pointer-events:auto;
     }
     .acc-panel::before {
         content:''; position:absolute; inset:0; pointer-events:none; border-radius:var(--radius);
-        background:linear-gradient(180deg, rgba(255,255,255,0.045), transparent 30%);
-        mask:linear-gradient(#000, #000);
-        -webkit-mask:linear-gradient(#000, #000);
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.06), transparent 25%),
+            repeating-linear-gradient(90deg, transparent 0 22px, rgba(255,255,255,0.012) 22px 23px);
+        mix-blend-mode:overlay;
     }
     .acc-hd {
         display:flex; align-items:center; gap:10px;
-        padding:14px 16px 12px 16px;
+        padding:15px 18px 13px 18px;
         border-bottom:1px solid var(--rim);
-        cursor:grab;
-        position:relative;
+        cursor:grab; position:relative;
     }
     .acc-hd:active { cursor:grabbing; }
+    .acc-hd::after {
+        content:''; position:absolute; left:18px; right:18px; bottom:-1px; height:1px;
+        background:linear-gradient(90deg, transparent, rgba(124,92,255,0.35), rgba(0,224,198,0.2), transparent);
+    }
     .acc-logo {
-        width:30px; height:30px; border-radius:9px;
-        background:conic-gradient(from 180deg at 50% 50%, #7c5cff, #00e0c6, #7c5cff);
+        width:32px; height:32px; border-radius:10px;
+        background:
+            conic-gradient(from 180deg at 50% 50%, #7c5cff 0deg, #00e0c6 120deg, #7c5cff 360deg);
         display:flex; align-items:center; justify-content:center;
         font-weight:800; font-size:13px; color:#0a0c12;
-        box-shadow:0 4px 20px rgba(124,92,255,0.4), 0 0 0 1px rgba(255,255,255,0.08) inset;
-        animation:acc-spin 12s linear infinite;
+        box-shadow:
+            0 6px 24px rgba(124,92,255,0.5),
+            0 0 0 1px rgba(255,255,255,0.10) inset,
+            0 1px 0 0 rgba(255,255,255,0.25) inset;
+        animation:acc-hue 14s linear infinite;
+        transition:transform 0.3s cubic-bezier(0.34,1.42,0.64,1);
     }
-    @keyframes acc-spin { to { filter:hue-rotate(360deg); } }
+    .acc-logo:hover { transform:rotate(-8deg) scale(1.06); }
+    @keyframes acc-hue { to { filter:hue-rotate(360deg); } }
     .acc-brand { display:flex; align-items:baseline; gap:8px; }
     .acc-name {
-        font-weight:800; font-size:15px; letter-spacing:-0.3px;
-        background:linear-gradient(135deg, #ffffff 0%, #b8bfd6 100%);
+        font-weight:800; font-size:16px; letter-spacing:-0.35px;
+        background:linear-gradient(135deg, #ffffff 0%, #c4cae0 60%, #8f97b3 100%);
         -webkit-background-clip:text; background-clip:text;
         -webkit-text-fill-color:transparent;
     }
     .acc-ver {
-        font-size:9px; font-weight:600; letter-spacing:0.5px;
+        font-size:9px; font-weight:700; letter-spacing:0.6px;
         color:var(--text-2);
-        background:rgba(124,92,255,0.14);
-        border:1px solid rgba(124,92,255,0.22);
-        padding:2px 7px; border-radius:20px;
+        background:linear-gradient(135deg, rgba(124,92,255,0.20), rgba(0,224,198,0.14));
+        border:1px solid rgba(124,92,255,0.28);
+        padding:2px 8px; border-radius:20px;
+        box-shadow:0 0 12px rgba(124,92,255,0.16);
     }
     .acc-hd-right { margin-left:auto; display:flex; align-items:center; gap:8px; }
     .acc-fps {
-        font-size:10px; font-weight:600; letter-spacing:0.3px;
-        color:var(--text-3); font-variant-numeric:tabular-nums;
-        padding:3px 8px; border-radius:8px;
-        background:rgba(255,255,255,0.03); border:1px solid var(--rim);
+        font-size:10px; font-weight:600; letter-spacing:0.35px;
+        color:var(--text-2); font-variant-numeric:tabular-nums;
+        padding:4px 9px; border-radius:9px;
+        background:rgba(255,255,255,0.035); border:1px solid var(--rim);
+        transition:border-color 0.2s, color 0.2s;
     }
+    .acc-fps.good { color:#00e0c6; border-color:rgba(0,224,198,0.35); }
+    .acc-fps.mid { color:#fdcb6e; border-color:rgba(253,203,110,0.35); }
+    .acc-fps.bad { color:#ff5566; border-color:rgba(255,85,102,0.35); }
     .acc-btn {
-        width:24px; height:24px; border-radius:8px;
+        width:26px; height:26px; border-radius:9px;
         display:flex; align-items:center; justify-content:center;
         font-size:12px; font-weight:600; line-height:1;
         color:var(--text-3); cursor:pointer; user-select:none;
-        background:rgba(255,255,255,0.03); border:1px solid var(--rim);
+        background:rgba(255,255,255,0.035); border:1px solid var(--rim);
         transition:background 0.18s, color 0.18s, border-color 0.18s, transform 0.14s;
     }
-    .acc-btn:hover { background:rgba(255,255,255,0.07); color:var(--text); border-color:var(--rim-2); }
-    .acc-btn:active { transform:scale(0.94); }
-    .acc-btn.close:hover { color:var(--danger); background:rgba(255,85,102,0.12); border-color:rgba(255,85,102,0.3); }
+    .acc-btn:hover { background:rgba(255,255,255,0.08); color:var(--text); border-color:var(--rim-2); }
+    .acc-btn:active { transform:scale(0.92); }
+    .acc-btn.close:hover { color:var(--danger); background:rgba(255,85,102,0.14); border-color:rgba(255,85,102,0.34); }
     .acc-strip {
         display:flex; align-items:center; gap:10px;
-        padding:8px 16px; border-bottom:1px solid var(--rim);
-        font-size:9.5px; font-weight:600; letter-spacing:0.35px;
+        padding:8px 18px 9px 18px; border-bottom:1px solid var(--rim);
+        font-size:9.5px; font-weight:600; letter-spacing:0.4px;
         color:var(--text-3); text-transform:uppercase;
     }
     .acc-dot {
@@ -721,13 +1048,13 @@
     .acc-strip .sp { flex:1; }
     .acc-pill {
         font-size:8.5px; font-weight:700; letter-spacing:0.5px;
-        padding:3px 8px; border-radius:20px;
-        background:rgba(255,85,102,0.10); color:rgba(255,85,102,0.75);
-        border:1px solid rgba(255,85,102,0.16);
+        padding:3px 9px; border-radius:20px;
+        background:rgba(255,85,102,0.12); color:rgba(255,85,102,0.8);
+        border:1px solid rgba(255,85,102,0.18);
         transition:opacity 0.2s, color 0.2s, background 0.2s;
     }
     .acc-tabs {
-        display:flex; gap:4px; padding:10px 14px 6px 14px;
+        display:flex; gap:4px; padding:11px 14px 7px 14px;
         position:relative;
     }
     .acc-tabs::after {
@@ -735,25 +1062,26 @@
         height:1px; background:var(--rim);
     }
     .acc-tab {
-        flex:1; text-align:center; padding:8px 0;
-        font-size:10px; font-weight:700; letter-spacing:0.7px;
+        flex:1; text-align:center; padding:9px 0;
+        font-size:9.5px; font-weight:700; letter-spacing:0.8px;
         color:var(--text-3); cursor:pointer; user-select:none;
-        border-radius:9px;
-        position:relative; z-index:1;
+        border-radius:10px; position:relative; z-index:1;
         transition:color 0.2s, background 0.2s, transform 0.15s;
     }
-    .acc-tab:hover { color:var(--text-2); }
+    .acc-tab:hover { color:var(--text-2); background:rgba(255,255,255,0.025); }
+    .acc-tab:active { transform:scale(0.97); }
     .acc-tab.on {
         color:#fff;
-        background:linear-gradient(135deg, rgba(124,92,255,0.22), rgba(0,224,198,0.14));
+        background:linear-gradient(135deg, rgba(124,92,255,0.24), rgba(0,224,198,0.16));
         box-shadow:
-            0 0 0 1px rgba(124,92,255,0.3) inset,
-            0 0 20px rgba(124,92,255,0.14);
+            0 0 0 1px rgba(124,92,255,0.34) inset,
+            0 0 24px rgba(124,92,255,0.18),
+            0 2px 6px rgba(0,0,0,0.3);
     }
     .acc-tab.on::before {
-        content:''; position:absolute; left:28%; right:28%; bottom:-6px; height:2px;
+        content:''; position:absolute; left:26%; right:26%; bottom:-7px; height:2px;
         background:linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent);
-        border-radius:2px; filter:blur(0.5px);
+        border-radius:2px; filter:blur(0.4px);
     }
     .acc-body {
         padding:14px 14px 16px 14px; overflow-y:auto; flex:1;
@@ -762,65 +1090,70 @@
     .acc-body::-webkit-scrollbar { width:5px; }
     .acc-body::-webkit-scrollbar-track { background:transparent; }
     .acc-body::-webkit-scrollbar-thumb {
-        background:linear-gradient(180deg, rgba(124,92,255,0.3), rgba(0,224,198,0.2));
+        background:linear-gradient(180deg, rgba(124,92,255,0.4), rgba(0,224,198,0.24));
         border-radius:6px;
     }
     .acc-page { display:none; animation:acc-fade 0.28s ease; }
     .acc-page.on { display:block; }
-    @keyframes acc-fade { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
+    @keyframes acc-fade { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
 
     .acc-sec {
-        margin-bottom:8px; border-radius:14px; overflow:hidden;
-        background:rgba(255,255,255,0.02);
+        margin-bottom:9px; border-radius:15px; overflow:hidden;
+        background:linear-gradient(180deg, rgba(255,255,255,0.028), rgba(255,255,255,0.014));
         border:1px solid var(--rim);
+        box-shadow:0 1px 0 0 rgba(255,255,255,0.03) inset;
+        transition:border-color 0.24s, box-shadow 0.24s, transform 0.2s;
+    }
+    .acc-sec:hover {
+        border-color:var(--rim-2);
+        box-shadow:0 1px 0 0 rgba(255,255,255,0.04) inset, 0 6px 20px rgba(0,0,0,0.22);
     }
     .acc-sec-hd {
-        display:flex; align-items:center; gap:9px;
-        padding:10px 12px; cursor:pointer; user-select:none;
-        background:linear-gradient(180deg, rgba(255,255,255,0.03), transparent);
+        display:flex; align-items:center; gap:10px;
+        padding:11px 13px; cursor:pointer; user-select:none;
+        background:linear-gradient(180deg, rgba(255,255,255,0.035), transparent);
         transition:background 0.2s;
     }
-    .acc-sec-hd:hover { background:linear-gradient(180deg, rgba(255,255,255,0.05), transparent); }
+    .acc-sec-hd:hover { background:linear-gradient(180deg, rgba(255,255,255,0.06), transparent); }
     .acc-sec-ico {
-        width:18px; height:18px; border-radius:6px;
-        background:linear-gradient(135deg, rgba(124,92,255,0.6), rgba(0,224,198,0.35));
+        width:20px; height:20px; border-radius:7px;
+        background:linear-gradient(135deg, rgba(124,92,255,0.7), rgba(0,224,198,0.4));
         display:flex; align-items:center; justify-content:center;
-        font-size:9px; font-weight:800; color:#0a0c12;
-        box-shadow:0 2px 8px rgba(124,92,255,0.25);
+        font-size:10px; font-weight:800; color:#0a0c12;
+        box-shadow:0 2px 10px rgba(124,92,255,0.32), 0 1px 0 0 rgba(255,255,255,0.25) inset;
     }
     .acc-sec-tit {
-        font-size:10.5px; font-weight:700; letter-spacing:0.6px;
+        font-size:10.5px; font-weight:700; letter-spacing:0.7px;
         color:var(--text-2); text-transform:uppercase;
     }
     .acc-sec-chev {
         margin-left:auto; font-size:9px; color:var(--text-3);
-        transition:transform 0.25s cubic-bezier(0.34,1.4,0.64,1);
+        transition:transform 0.28s cubic-bezier(0.34,1.42,0.64,1);
     }
     .acc-sec.col .acc-sec-chev { transform:rotate(-90deg); }
     .acc-sec-bd {
-        padding:2px 12px 10px 12px;
-        max-height:2000px; overflow:hidden;
-        transition:max-height 0.32s ease, opacity 0.24s ease, padding 0.24s ease;
+        padding:3px 13px 11px 13px;
+        max-height:2600px; overflow:hidden;
+        transition:max-height 0.34s ease, opacity 0.24s ease, padding 0.24s ease;
         opacity:1;
     }
-    .acc-sec.col .acc-sec-bd {
-        max-height:0; opacity:0; padding-top:0; padding-bottom:0;
-    }
+    .acc-sec.col .acc-sec-bd { max-height:0; opacity:0; padding-top:0; padding-bottom:0; }
+
     .acc-row {
         display:flex; align-items:center; justify-content:space-between;
-        gap:12px; padding:9px 6px;
-        border-radius:8px;
-        transition:background 0.16s;
+        gap:12px; padding:9px 8px;
+        border-radius:9px;
+        transition:background 0.16s, padding 0.16s;
     }
-    .acc-row:hover { background:rgba(255,255,255,0.025); }
+    .acc-row:hover { background:rgba(255,255,255,0.03); padding-left:11px; padding-right:11px; }
     .acc-row + .acc-row { border-top:1px solid rgba(255,255,255,0.025); }
     .acc-lb { display:flex; flex-direction:column; gap:2px; min-width:0; }
     .acc-lb-main { font-size:11.5px; font-weight:500; color:var(--text); }
     .acc-lb-sub { font-size:9px; font-weight:400; color:var(--text-3); letter-spacing:0.15px; }
     .acc-lb kbd {
-        font-size:8px; font-weight:600; padding:1.5px 6px;
-        background:rgba(255,255,255,0.05); border:1px solid var(--rim);
-        border-radius:5px; font-family:inherit; color:var(--text-3);
+        font-size:8px; font-weight:700; padding:1.5px 6px;
+        background:rgba(255,255,255,0.06); border:1px solid var(--rim);
+        border-radius:5px; font-family:inherit; color:var(--text-2);
         margin-left:6px; letter-spacing:0.4px;
     }
 
@@ -836,124 +1169,155 @@
         background:linear-gradient(180deg, #ffffff, #c8cde0);
         position:absolute; top:2px; left:2px;
         box-shadow:0 2px 6px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.6) inset;
-        transition:left 0.32s cubic-bezier(0.34,1.55,0.64,1), background 0.28s, box-shadow 0.28s;
+        transition:left 0.34s cubic-bezier(0.34,1.55,0.64,1), background 0.28s, box-shadow 0.28s;
     }
-    .acc-tog:hover { background:rgba(255,255,255,0.10); }
-    .acc-tog:active .kn { transform:scale(0.94); }
+    .acc-tog:hover { background:rgba(255,255,255,0.1); }
+    .acc-tog:active .kn { transform:scale(0.92); }
     .acc-tog.on {
         background:linear-gradient(135deg, var(--accent), var(--accent-2));
-        border-color:rgba(124,92,255,0.4);
-        box-shadow:0 0 20px rgba(124,92,255,0.28);
+        border-color:rgba(124,92,255,0.42);
+        box-shadow:0 0 22px rgba(124,92,255,0.32);
     }
     .acc-tog.on .kn {
         left:18px;
-        box-shadow:0 2px 12px rgba(124,92,255,0.5), 0 1px 0 rgba(255,255,255,0.6) inset;
+        box-shadow:0 2px 12px rgba(124,92,255,0.55), 0 1px 0 rgba(255,255,255,0.6) inset;
     }
 
-    .acc-sl-wrap { padding:8px 6px 10px 6px; border-radius:8px; transition:background 0.16s; }
-    .acc-sl-wrap:hover { background:rgba(255,255,255,0.02); }
-    .acc-sl-head {
-        display:flex; align-items:center; justify-content:space-between;
-        margin-bottom:7px;
-    }
+    .acc-sl-wrap { padding:9px 8px 11px 8px; border-radius:9px; transition:background 0.16s; }
+    .acc-sl-wrap:hover { background:rgba(255,255,255,0.022); }
+    .acc-sl-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
     .acc-sl-lbl { font-size:10.5px; font-weight:500; color:var(--text-2); }
     .acc-sl-val {
         display:flex; align-items:center; gap:1px;
-        background:rgba(124,92,255,0.10);
-        border:1px solid rgba(124,92,255,0.18);
-        border-radius:7px; padding:1px;
+        background:linear-gradient(135deg, rgba(124,92,255,0.14), rgba(0,224,198,0.08));
+        border:1px solid rgba(124,92,255,0.22);
+        border-radius:8px; padding:1px;
     }
     .acc-sl-val button {
-        width:16px; height:16px; border:0; border-radius:5px;
+        width:17px; height:17px; border:0; border-radius:5px;
         background:transparent; color:var(--text-2);
-        font-size:11px; font-weight:600; line-height:1;
+        font-size:11px; font-weight:700; line-height:1;
         cursor:pointer; font-family:inherit;
-        transition:background 0.15s, color 0.15s;
+        transition:background 0.15s, color 0.15s, transform 0.12s;
     }
-    .acc-sl-val button:hover { background:rgba(124,92,255,0.2); color:#fff; }
+    .acc-sl-val button:hover { background:rgba(124,92,255,0.24); color:#fff; }
+    .acc-sl-val button:active { transform:scale(0.9); }
     .acc-sl-val span {
-        min-width:44px; text-align:center;
-        font-size:10px; font-weight:600; color:var(--text);
+        min-width:48px; text-align:center;
+        font-size:10px; font-weight:700; color:var(--text);
         font-variant-numeric:tabular-nums; padding:0 4px;
     }
     .acc-sl {
         -webkit-appearance:none; appearance:none;
         width:100%; height:5px; border-radius:5px; outline:none;
         background:rgba(255,255,255,0.06);
-        position:relative;
     }
     .acc-sl::-webkit-slider-thumb {
         -webkit-appearance:none; appearance:none;
         width:15px; height:15px; border-radius:50%;
         background:radial-gradient(circle at 30% 30%, #ffffff, #a09ae8 60%, #7c5cff 100%);
         cursor:pointer;
-        box-shadow:
-            0 2px 10px rgba(124,92,255,0.45),
-            0 0 0 1px rgba(255,255,255,0.12);
+        box-shadow:0 2px 12px rgba(124,92,255,0.5), 0 0 0 1px rgba(255,255,255,0.14);
         transition:transform 0.15s;
     }
-    .acc-sl::-webkit-slider-thumb:hover { transform:scale(1.12); }
+    .acc-sl::-webkit-slider-thumb:hover { transform:scale(1.14); }
     .acc-sl::-moz-range-thumb {
         width:15px; height:15px; border-radius:50%; border:none;
         background:radial-gradient(circle at 30% 30%, #ffffff, #a09ae8 60%, #7c5cff 100%);
         cursor:pointer;
-        box-shadow:0 2px 10px rgba(124,92,255,0.45);
+        box-shadow:0 2px 12px rgba(124,92,255,0.5);
     }
 
     .acc-sel {
-        background:rgba(255,255,255,0.04);
-        border:1px solid var(--rim);
-        border-radius:8px;
-        color:var(--text);
-        padding:5px 10px;
+        background:rgba(255,255,255,0.045);
+        border:1px solid var(--rim); border-radius:9px;
+        color:var(--text); padding:6px 11px;
         font-size:10.5px; font-weight:500; font-family:inherit;
         cursor:pointer; outline:none;
-        transition:border-color 0.18s, background 0.18s;
+        transition:border-color 0.18s, background 0.18s, box-shadow 0.18s;
         -webkit-appearance:none; appearance:none;
-        background-image:linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.35) 50%), linear-gradient(135deg, rgba(255,255,255,0.35) 50%, transparent 50%);
+        background-image:
+            linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.42) 50%),
+            linear-gradient(135deg, rgba(255,255,255,0.42) 50%, transparent 50%);
         background-position:calc(100% - 13px) 50%, calc(100% - 8px) 50%;
         background-size:5px 5px, 5px 5px;
         background-repeat:no-repeat;
         padding-right:24px;
     }
-    .acc-sel:hover { border-color:var(--rim-2); background-color:rgba(255,255,255,0.06); }
-    .acc-sel:focus { border-color:rgba(124,92,255,0.4); box-shadow:0 0 0 3px rgba(124,92,255,0.12); }
-    .acc-sel option { background:#10131c; color:#e8ebf5; }
+    .acc-sel:hover { border-color:var(--rim-2); background-color:rgba(255,255,255,0.07); }
+    .acc-sel:focus { border-color:rgba(124,92,255,0.45); box-shadow:0 0 0 3px rgba(124,92,255,0.16); }
+    .acc-sel option { background:#10131c; color:#e9ecf6; }
 
     .acc-col {
-        width:32px; height:22px; border-radius:6px; padding:0;
-        border:1px solid var(--rim);
-        background:transparent; cursor:pointer;
+        width:34px; height:24px; border-radius:7px; padding:0;
+        border:1px solid var(--rim); background:transparent; cursor:pointer;
         transition:border-color 0.18s, transform 0.14s;
     }
-    .acc-col:hover { border-color:var(--rim-2); transform:scale(1.04); }
+    .acc-col:hover { border-color:var(--rim-2); transform:scale(1.05); }
     .acc-col::-webkit-color-swatch-wrapper { padding:2px; }
-    .acc-col::-webkit-color-swatch { border:none; border-radius:4px; }
-    .acc-col::-moz-color-swatch { border:none; border-radius:4px; }
+    .acc-col::-webkit-color-swatch { border:none; border-radius:5px; }
+    .acc-col::-moz-color-swatch { border:none; border-radius:5px; }
 
     .acc-ft {
         display:flex; align-items:center; justify-content:space-between;
-        padding:9px 16px 12px 16px;
-        border-top:1px solid var(--rim);
-        font-size:8.5px; font-weight:600; letter-spacing:0.4px;
+        padding:10px 18px 13px 18px; border-top:1px solid var(--rim);
+        font-size:8.5px; font-weight:600; letter-spacing:0.45px;
         color:var(--text-3); text-transform:uppercase;
     }
     .acc-keys { display:flex; gap:4px; }
     .acc-keys kbd {
-        font-family:inherit; font-size:8.5px; font-weight:600;
+        font-family:inherit; font-size:8.5px; font-weight:700;
         padding:2px 6px; border-radius:5px;
-        background:rgba(255,255,255,0.04);
+        background:rgba(255,255,255,0.045);
         border:1px solid var(--rim);
         color:var(--text-3);
     }
-    .acc-hint { font-size:9.5px; color:var(--text-3); line-height:1.75; padding:4px 2px; }
+    .acc-hint { font-size:9.5px; color:var(--text-3); line-height:1.8; padding:5px 3px; }
     .acc-hint b { color:var(--text-2); font-weight:600; }
+
+    .acc-btn-lg {
+        padding:9px 12px; border-radius:10px;
+        font-size:10.5px; font-weight:700; letter-spacing:0.4px;
+        background:linear-gradient(135deg, rgba(124,92,255,0.16), rgba(0,224,198,0.10));
+        border:1px solid rgba(124,92,255,0.28);
+        color:var(--text); cursor:pointer;
+        transition:transform 0.14s, background 0.2s, box-shadow 0.2s, border-color 0.2s;
+        font-family:inherit; text-transform:uppercase;
+    }
+    .acc-btn-lg:hover {
+        background:linear-gradient(135deg, rgba(124,92,255,0.26), rgba(0,224,198,0.18));
+        border-color:rgba(124,92,255,0.42);
+        box-shadow:0 6px 20px rgba(124,92,255,0.24);
+        transform:translateY(-1px);
+    }
+    .acc-btn-lg:active { transform:translateY(0) scale(0.98); }
+    .acc-btn-lg.danger {
+        background:linear-gradient(135deg, rgba(255,85,102,0.18), rgba(255,85,102,0.06));
+        border-color:rgba(255,85,102,0.32); color:#ff8f9c;
+    }
+    .acc-btn-lg.danger:hover {
+        background:linear-gradient(135deg, rgba(255,85,102,0.28), rgba(255,85,102,0.14));
+        border-color:rgba(255,85,102,0.48);
+        box-shadow:0 6px 20px rgba(255,85,102,0.24);
+    }
+    .acc-btn-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:6px 2px; }
+    .acc-btn-grid.three { grid-template-columns:1fr 1fr 1fr; }
+    .acc-btn-grid .full { grid-column:1 / -1; }
+
+    #perfOverlay {
+        position:fixed; top:10px; left:10px; z-index:9998; pointer-events:none;
+        padding:6px 10px; border-radius:8px;
+        background:rgba(8,10,16,0.7); border:1px solid rgba(255,255,255,0.08);
+        font-family:'SF Mono','Menlo','Consolas',monospace; font-size:10px;
+        color:#00e0c6; letter-spacing:0.4px; line-height:1.5;
+        backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+        box-shadow:0 8px 32px rgba(0,0,0,0.5);
+    }
     `;
 
     function buildUI() {
         const style = document.createElement('style');
-        style.id = ID.style;
-        style.textContent = CSS;
+        style.id = ID.style; style.textContent = CSS;
         document.head.appendChild(style);
 
         canvas = document.createElement('canvas');
@@ -965,9 +1329,17 @@
         function rs() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
         window.addEventListener('resize', rs); rs();
 
+        // Perf overlay
+        const ov = document.createElement('div');
+        ov.id = 'perfOverlay';
+        ov.style.display = settings.perfShowOverlay ? 'block' : 'none';
+        ov.textContent = 'FPS -- | scale --';
+        document.body.appendChild(ov);
+        refs.perfOverlay = ov;
+
         const radar = document.createElement('div');
         radar.id = ID.radar;
-        radar.style.cssText = `position:fixed;bottom:28px;right:28px;z-index:9997;border-radius:50%;pointer-events:none;border:1px solid rgba(255,255,255,0.05);box-shadow:0 8px 40px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.03);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);background:rgba(10,12,18,0.55);overflow:hidden;width:${settings.radarSize}px;height:${settings.radarSize}px;display:${settings.radarEnabled?'block':'none'};`;
+        radar.style.cssText = `position:fixed;bottom:28px;right:28px;z-index:9997;border-radius:50%;pointer-events:none;border:1px solid rgba(255,255,255,0.05);box-shadow:0 12px 50px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.03);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(8,10,16,0.58);overflow:hidden;width:${settings.radarSize}px;height:${settings.radarSize}px;display:${settings.radarEnabled?'block':'none'};`;
         document.body.appendChild(radar);
         refs.radar = radar;
         radarCanvas = document.createElement('canvas');
@@ -988,10 +1360,10 @@
                 <div class="acc-logo">A</div>
                 <div class="acc-brand">
                     <div class="acc-name">ACCEL</div>
-                    <div class="acc-ver">v14</div>
+                    <div class="acc-ver">v15 PRO</div>
                 </div>
                 <div class="acc-hd-right">
-                    <div class="acc-fps"><span id="${ID.fps}">0</span> FPS</div>
+                    <div class="acc-fps" id="${ID.fps}">0 FPS</div>
                     <div class="acc-btn" id="${ID.min}">−</div>
                     <div class="acc-btn close" id="${ID.close}">✕</div>
                 </div>
@@ -1006,7 +1378,7 @@
             <div class="acc-tabs" id="${ID.tabs}"></div>
             <div class="acc-body" id="${ID.content}"></div>
             <div class="acc-ft">
-                <span>ACCEL · rage</span>
+                <span>ACCEL · v15 PRO</span>
                 <div class="acc-keys">
                     ${['F1','F2','F3','F4','H','↑↓'].map(k=>`<kbd>${k}</kbd>`).join('')}
                 </div>
@@ -1022,48 +1394,37 @@
         refs.tabs = document.getElementById(ID.tabs);
         refs.drag = document.getElementById(ID.drag);
         refs.content = document.getElementById(ID.content);
-        refs.panel = panel;
-        refs.radarDiv = radar;
-        refs.radarCanvas = radarCanvas;
 
-        // Tabs
         const TABS = [
             { id:'aim', label:'AIM' },
             { id:'esp', label:'ESP' },
             { id:'rage', label:'RAGE' },
+            { id:'perf', label:'PERF' },
             { id:'set', label:'SET' },
         ];
         let activeTab = 'aim';
         refs.tabs.innerHTML = TABS.map(t => `<div class="acc-tab${t.id===activeTab?' on':''}" data-tab="${t.id}">${t.label}</div>`).join('');
         refs.tabEls = refs.tabs.querySelectorAll('.acc-tab');
 
-        // Pages
         const pages = {};
         function page(id, html) {
             const div = document.createElement('div');
             div.className = 'acc-page' + (id === activeTab ? ' on' : '');
-            div.dataset.page = id;
-            div.innerHTML = html;
-            refs.content.appendChild(div);
-            pages[id] = div;
+            div.dataset.page = id; div.innerHTML = html;
+            refs.content.appendChild(div); pages[id] = div;
         }
 
         // ── component builders ──
-        function toggle(key, label, sub) {
+        const toggle = (key, label, sub) => {
             const on = !!settings[key];
             return `<div class="acc-row">
-                <div class="acc-lb">
-                    <div class="acc-lb-main">${label}</div>
-                    ${sub ? `<div class="acc-lb-sub">${sub}</div>` : ''}
-                </div>
+                <div class="acc-lb"><div class="acc-lb-main">${label}</div>${sub?`<div class="acc-lb-sub">${sub}</div>`:''}</div>
                 <div class="acc-tog${on?' on':''}" data-tog="${key}"><div class="kn"></div></div>
             </div>`;
-        }
-        function slider(key, min, max, step, label, suffix) {
-            const v = settings[key];
-            const sfx = suffix || '';
-            const stepFwd = step;
-            return `<div class="acc-sl-wrap" data-sl="${key}">
+        };
+        const slider = (key, min, max, step, label, suffix) => {
+            const v = settings[key]; const sfx = suffix || '';
+            return `<div class="acc-sl-wrap">
                 <div class="acc-sl-head">
                     <div class="acc-sl-lbl">${label}</div>
                     <div class="acc-sl-val">
@@ -1074,43 +1435,26 @@
                 </div>
                 <input type="range" class="acc-sl" data-slider="${key}" data-min="${min}" data-max="${max}" data-step="${step}" data-suffix="${sfx}" min="${min}" max="${max}" step="${step}" value="${v}">
             </div>`;
-        }
-        function select(key, label, opts, sub) {
-            const html = Object.keys(opts).map(k =>
-                `<option value="${k}" ${settings[key]===k?'selected':''}>${opts[k]}</option>`).join('');
+        };
+        const select = (key, label, opts, sub) => {
+            const html = Object.keys(opts).map(k => `<option value="${k}" ${settings[key]===k?'selected':''}>${opts[k]}</option>`).join('');
             return `<div class="acc-row">
-                <div class="acc-lb">
-                    <div class="acc-lb-main">${label}</div>
-                    ${sub ? `<div class="acc-lb-sub">${sub}</div>` : ''}
-                </div>
+                <div class="acc-lb"><div class="acc-lb-main">${label}</div>${sub?`<div class="acc-lb-sub">${sub}</div>`:''}</div>
                 <select class="acc-sel" data-sel="${key}">${html}</select>
             </div>`;
-        }
-        function color(key, label) {
-            return `<div class="acc-row">
-                <div class="acc-lb"><div class="acc-lb-main">${label}</div></div>
-                <input type="color" class="acc-col" data-col="${key}" value="${settings[key]||'#ffffff'}">
-            </div>`;
-        }
-        function row(label, html, sub, kbd) {
-            return `<div class="acc-row">
-                <div class="acc-lb">
-                    <div class="acc-lb-main">${label}${kbd?` <kbd>${kbd}</kbd>`:''}</div>
-                    ${sub ? `<div class="acc-lb-sub">${sub}</div>` : ''}
-                </div>
-                ${html}
-            </div>`;
-        }
-        function section(icon, title, body, collapsed) {
-            return `<div class="acc-sec${collapsed?' col':''}" data-sec>
-                <div class="acc-sec-hd">
-                    <div class="acc-sec-ico">${icon}</div>
-                    <div class="acc-sec-tit">${title}</div>
-                    <div class="acc-sec-chev">▾</div>
-                </div>
-                <div class="acc-sec-bd">${body}</div>
-            </div>`;
-        }
+        };
+        const color = (key, label) => `<div class="acc-row">
+            <div class="acc-lb"><div class="acc-lb-main">${label}</div></div>
+            <input type="color" class="acc-col" data-col="${key}" value="${settings[key]||'#ffffff'}">
+        </div>`;
+        const row = (label, html, sub, kbd) => `<div class="acc-row">
+            <div class="acc-lb"><div class="acc-lb-main">${label}${kbd?` <kbd>${kbd}</kbd>`:''}</div>${sub?`<div class="acc-lb-sub">${sub}</div>`:''}</div>
+            ${html}
+        </div>`;
+        const section = (icon, title, body, collapsed) => `<div class="acc-sec${collapsed?' col':''}">
+            <div class="acc-sec-hd"><div class="acc-sec-ico">${icon}</div><div class="acc-sec-tit">${title}</div><div class="acc-sec-chev">▾</div></div>
+            <div class="acc-sec-bd">${body}</div>
+        </div>`;
 
         page('aim', `
             ${section('◎','Aimbot', `
@@ -1130,6 +1474,10 @@
                 ${slider('pitchMax',1.0,1.55,0.01,'Pitch Clamp','')}
                 ${slider('aimOffset',5,25,0.5,'Aim Offset','')}
                 ${slider('camOffset',4,10,0.5,'Cam Offset','')}
+            `)}
+            ${section('◈','Target Filter', `
+                ${toggle('targetFilter','Filter Target Position','Kills residual shake')}
+                ${slider('targetFilterStrength',0.0,0.95,0.05,'Filter Strength','')}
             `)}
             ${section('✦','Soft Aim', `
                 ${slider('softStrength',0.05,1.0,0.05,'Strength','')}
@@ -1180,8 +1528,17 @@
                 ${slider('skeletonJointSize',1,8,0.5,'Joint Size','')}
                 ${slider('skeletonSmooth',0.05,0.95,0.05,'Smooth','')}
                 ${slider('skeletonMinConf',0.0,1.0,0.05,'Min Conf','')}
-                ${color('skeletonColor','Skeleton Color')}
+                ${toggle('skeletonPerLimbColor','Per-Limb Colors','')}
             `)}
+            ${section('◈','Skeleton Colors', `
+                ${!settings.skeletonPerLimbColor ? color('skeletonColor','Skeleton') : ''}
+                ${settings.skeletonPerLimbColor ? `
+                    ${color('skeletonHeadColor','Head')}
+                    ${color('skeletonTorsoColor','Torso')}
+                    ${color('skeletonArmColor','Arms')}
+                    ${color('skeletonLegColor','Legs')}
+                ` : ''}
+            `, settings.skeletonPerLimbColor ? false : true)}
             ${section('◉','Radar', `
                 ${toggle('radarEnabled','Radar','')}
                 ${slider('radarSize',80,200,10,'Size','')}
@@ -1222,6 +1579,45 @@
             `)}
         `);
 
+        page('perf', `
+            ${section('⚙','Graphics Pipeline', `
+                ${toggle('perfEnabled','Perf Mode','Master')}
+                ${slider('perfRenderScale',0.4,1.0,0.05,'Render Scale','×')}
+                ${slider('perfPixelRatioCap',0.5,2.0,0.1,'Pixel Ratio Cap','×')}
+                ${slider('perfFrameCap',0,300,1,'Frame Cap (0=off)',' fps')}
+            `)}
+            ${section('☢','Quality Culls', `
+                ${toggle('perfDisableShadows','Disable Shadows','')}
+                ${toggle('perfDisableMSAA','Disable MSAA','')}
+                ${toggle('perfDisableFog','Disable Fog','')}
+                ${toggle('perfDisableParticles','Cull Particles','')}
+                ${toggle('perfCullLights','Cull Lights','Dir/Point/Spot only')}
+                ${toggle('perfCullStatic','Cull Static Casters','')}
+                ${select('perfTextureQuality','Texture Quality',{ 0:'Low', 1:'Auto', 2:'High' })}
+                ${select('perfAnisoMax','Anisotropy',{ 0:'Off', 1:'1×', 2:'2×', 4:'4×', 8:'8×', 16:'16×' })}
+                ${select('perfPowerPref','Power Pref',{ 'default':'Default', 'high-performance':'High Perf', 'low-power':'Low Power' })}
+            `)}
+            ${section('⚡','Adaptive Governor', `
+                ${toggle('perfAdaptive','Adaptive Scaling','Auto-tune render scale to target FPS')}
+                ${slider('perfTargetFps',30,300,5,'Target FPS',' fps')}
+                ${slider('perfMinScale',0.3,1.0,0.05,'Min Scale','×')}
+                ${slider('perfMaxScale',0.5,1.0,0.05,'Max Scale','×')}
+            `)}
+            ${section('▦','Overlay', `
+                ${toggle('perfShowOverlay','Show FPS Overlay','')}
+            `)}
+            ${section('⇌','Actions', `
+                <div class="acc-btn-grid">
+                    <button class="acc-btn-lg" data-act="applyPerf">Apply Now</button>
+                    <button class="acc-btn-lg" data-act="scanRenderer">Find Renderer</button>
+                </div>
+                <div class="acc-hint" style="margin-top:6px">
+                    <b>Apply Now</b> re-runs the perf pipeline against the current renderer.<br>
+                    <b>Find Renderer</b> scans window for the active WebGLRenderer.
+                </div>
+            `)}
+        `);
+
         page('set', `
             ${section('◈','Team', `
                 ${row('Force Team', `<select class="acc-sel" id="${ID.force}">
@@ -1239,6 +1635,21 @@
                 ${toggle('encryptStorage','Encrypt Storage','')}
                 ${toggle('spoofToString','Spoof toString','')}
             `)}
+            ${section('⚙','Config', `
+                <div class="acc-btn-grid three">
+                    <button class="acc-btn-lg" data-act="export">Export</button>
+                    <button class="acc-btn-lg" data-act="import">Import</button>
+                    <button class="acc-btn-lg" data-act="reload">Reload</button>
+                </div>
+                <div class="acc-btn-grid" style="margin-top:8px">
+                    <button class="acc-btn-lg danger full" data-act="reset">Reset All Settings</button>
+                </div>
+                <div class="acc-hint" style="margin-top:8px">
+                    <b>Export</b> downloads your config as JSON.<br>
+                    <b>Import</b> loads a saved JSON and reloads the page.<br>
+                    <b>Reset All</b> restores every setting to default and reloads.
+                </div>
+            `, false)}
             ${section('⌘','Keybinds', `
                 <div class="acc-hint">
                     <b>F1</b> Aimbot toggle · <b>F2</b> Silent Aim · <b>F3</b> Lock Mode<br>
@@ -1255,9 +1666,7 @@
                     refs.tabEls.forEach(t => t.classList.remove('on'));
                     tab.classList.add('on');
                     activeTab = tab.dataset.tab;
-                    Object.keys(pages).forEach(k => {
-                        pages[k].classList.toggle('on', k === activeTab);
-                    });
+                    Object.keys(pages).forEach(k => pages[k].classList.toggle('on', k === activeTab));
                 });
             });
             root.querySelectorAll('.acc-sec-hd').forEach(h => {
@@ -1268,29 +1677,32 @@
                     const k = el.dataset.tog;
                     settings[k] = !settings[k];
                     el.classList.toggle('on', settings[k]);
-                    if (k === 'radarEnabled' && refs.radarDiv) refs.radarDiv.style.display = settings.radarEnabled ? 'block' : 'none';
+                    if (k === 'radarEnabled' && refs.radar) refs.radar.style.display = settings.radarEnabled ? 'block' : 'none';
+                    if (k === 'perfShowOverlay' && refs.perfOverlay) refs.perfOverlay.style.display = settings.perfShowOverlay ? 'block' : 'none';
+                    if (k === 'perfEnabled' || k === 'perfDisableShadows' || k === 'perfDisableFog' || k === 'perfDisableParticles' || k === 'perfCullLights') {
+                        applyPerf();
+                    }
+                    if (k === 'skeletonPerLimbColor') { location.reload(); return; }
                     updateStatus(); saveSettings();
                 });
             });
             root.querySelectorAll('input.acc-sl').forEach(el => {
                 const key = el.dataset.slider;
                 const sfx = el.dataset.suffix || '';
-                const min = parseFloat(el.dataset.min);
-                const max = parseFloat(el.dataset.max);
-                const step = parseFloat(el.dataset.step);
-                function apply() {
+                el.addEventListener('input', () => {
                     const v = parseFloat(el.value);
                     settings[key] = v;
                     const lbl = document.getElementById('sv_' + key);
                     if (lbl) lbl.textContent = v + sfx;
-                    if (key === 'radarSize' && refs.radarDiv) {
-                        refs.radarDiv.style.width = v + 'px';
-                        refs.radarDiv.style.height = v + 'px';
+                    if (key === 'radarSize' && refs.radar) {
+                        refs.radar.style.width = v + 'px'; refs.radar.style.height = v + 'px';
                         if (radarCanvas) { radarCanvas.width = v; radarCanvas.height = v; }
                     }
+                    if (key === 'perfRenderScale' || key === 'perfPixelRatioCap') {
+                        applyPerf();
+                    }
                     saveSettings();
-                }
-                el.addEventListener('input', apply);
+                });
             });
             root.querySelectorAll('.acc-sl-val button').forEach(btn => {
                 btn.addEventListener('click', (e) => {
@@ -1312,19 +1724,29 @@
             root.querySelectorAll('select[data-sel]').forEach(el => {
                 el.addEventListener('change', () => {
                     settings[el.dataset.sel] = el.value;
+                    if (el.dataset.sel === 'perfPowerPref' || el.dataset.sel === 'perfTextureQuality' || el.dataset.sel === 'perfAnisoMax') applyPerf();
                     saveSettings();
                 });
             });
             root.querySelectorAll('input[type="color"][data-col]').forEach(el => {
-                el.addEventListener('input', () => {
-                    settings[el.dataset.col] = el.value;
-                    saveSettings();
+                el.addEventListener('input', () => { settings[el.dataset.col] = el.value; saveSettings(); });
+            });
+            root.querySelectorAll('button[data-act]').forEach(el => {
+                el.addEventListener('click', () => {
+                    const act = el.dataset.act;
+                    if (act === 'applyPerf') { applyPerf(); }
+                    if (act === 'scanRenderer') { renderer = null; findRenderer(); applyPerf(); }
+                    if (act === 'export') { exportSettings(); }
+                    if (act === 'import') { importSettings(); }
+                    if (act === 'reload') { location.reload(); }
+                    if (act === 'reset') {
+                        if (confirm('Reset ALL settings to default? This reloads the page.')) resetSettings();
+                    }
                 });
             });
         }
         bindAll(panel);
 
-        // ── panel controls ──
         refs.min.addEventListener('click', () => {
             minimized = !minimized;
             panel.querySelectorAll('.acc-page').forEach(p => { p.style.display = minimized ? 'none' : ''; });
@@ -1334,7 +1756,7 @@
         });
         refs.close.addEventListener('click', () => {
             uiVisible = false;
-            panel.style.transform = 'translateX(440px) scale(0.94)';
+            panel.style.transform = 'translateX(460px) scale(0.94)';
             panel.style.opacity = '0'; panel.style.pointerEvents = 'none';
         });
         let drag = false, offX = 0, offY = 0;
@@ -1346,20 +1768,19 @@
         });
         document.addEventListener('mousemove', (e) => {
             if (!drag) return;
-            const L = Math.max(0, Math.min(window.innerWidth - 420, e.clientX - offX));
+            const L = Math.max(0, Math.min(window.innerWidth - 440, e.clientX - offX));
             const T = Math.max(0, Math.min(window.innerHeight - 100, e.clientY - offY));
             panel.style.left = L + 'px'; panel.style.top = T + 'px'; panel.style.right = 'auto';
         });
         document.addEventListener('mouseup', () => drag = false);
 
-        // ── keyboard ──
         const ft = document.getElementById(ID.force);
         document.addEventListener('keydown', (e) => {
             keys[e.code] = true;
             if (e.key === '"' || e.code === 'Quote') {
                 uiVisible = !uiVisible;
                 if (uiVisible) { panel.style.transform = ''; panel.style.opacity = ''; panel.style.pointerEvents = ''; }
-                else { panel.style.transform = 'translateX(440px) scale(0.94)'; panel.style.opacity = '0'; panel.style.pointerEvents = 'none'; }
+                else { panel.style.transform = 'translateX(460px) scale(0.94)'; panel.style.opacity = '0'; panel.style.pointerEvents = 'none'; }
                 e.preventDefault(); return;
             }
             if (e.key === 'F1') { settings.aimbot = !settings.aimbot; syncTogs(); updateStatus(); saveSettings(); e.preventDefault(); }
@@ -1387,9 +1808,9 @@
 
         if (ft) ft.addEventListener('change', () => { settings.forceTeam = parseInt(ft.value); saveSettings(); updateStatus(); });
 
-        // ── hide our DOM from external scanners ──
+        // hide own DOM
         const _our = new WeakSet();
-        [canvas, radar, radarCanvas, panel].forEach(x => _our.add(x));
+        [canvas, radar, radarCanvas, panel, ov].forEach(x => _our.add(x));
         panel.querySelectorAll('*').forEach(x => _our.add(x));
         const isOurs = (el) => { let p = el; while (p) { if (_our.has(p)) return true; p = p.parentNode; } return false; };
         const _qsa = Document.prototype.querySelectorAll;
@@ -1411,7 +1832,7 @@
     }
     function updateStatus() {
         const p = refs.panel;
-        if (p) p.style.borderColor = settings.aimbot ? (settings.lockMode ? 'rgba(253,203,110,0.28)' : 'rgba(124,92,255,0.28)') : '';
+        if (p) p.style.borderColor = settings.aimbot ? (settings.lockMode ? 'rgba(253,203,110,0.3)' : 'rgba(124,92,255,0.3)') : '';
         const wp = document.getElementById('wbPill');
         if (wp) wp.style.opacity = settings.wallBang ? '1' : '0.3';
     }
@@ -1442,13 +1863,22 @@
         const now = performance.now();
         const dtRaw = (now - lastFrameTime) / 1000;
         lastFrameTime = now;
-        // Cap dt to prevent big jumps after tab-out
         const dt = Math.min(dtRaw, 0.05);
 
         frameCount++;
         if (now - lastFpsUpdate > 1000) {
             fps = frameCount; frameCount = 0; lastFpsUpdate = now;
-            if (refs.fps) refs.fps.innerText = fps;
+            if (refs.fps) {
+                refs.fps.innerText = fps + ' FPS';
+                refs.fps.classList.remove('good','mid','bad');
+                if (fps >= 120) refs.fps.classList.add('good');
+                else if (fps >= 60) refs.fps.classList.add('mid');
+                else refs.fps.classList.add('bad');
+            }
+            if (refs.perfOverlay && settings.perfShowOverlay) {
+                refs.perfOverlay.textContent = `FPS ${fps} | scale ${settings.perfRenderScale.toFixed(2)}× | dpr-cap ${settings.perfPixelRatioCap.toFixed(1)}×`;
+            }
+            perfTick(dt);
         }
         if (!ctx || !isHooked || !scene) { if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height); return; }
         if (!raycastHooked) installWallbang();
@@ -1465,14 +1895,12 @@
 
         if (settings.autoBhop) doBhop();
 
-        // ── read current rotation (raw) ──
         const curPitch = myPlayer.children[0].rotation.x;
         const curYaw = myPlayer.rotation.y;
         if (firing && !wasFiring) Recoil.begin(curPitch, curYaw);
         if (!firing && wasFiring) Recoil.end();
         wasFiring = firing;
 
-        // ── enemies ──
         const myTeamID = getMyTeam();
         const enemies = [];
         playerSet = new WeakSet();
@@ -1491,18 +1919,7 @@
         targetCount = enemies.length;
         if (refs.count) refs.count.innerText = targetCount;
 
-        /* ───────────────────────────────────────────────────────
-           AIM — ABSOLUTE-TARGET EXPONENTIAL LERP
-           key properties:
-             · we aim AT a target angle, not incrementally toward it
-               → prevents compound jitter from frame-to-frame noise
-             · dt-normalized: smoothing value = time constant
-               → same feel at 60fps and 240fps
-             · deadzone: stop writing when we're this close
-               → kills the final-frame micro-shake
-             · velocity cap: never move more than X rad/sec
-               → no overshoot when target teleports
-           ─────────────────────────────────────────────────────── */
+        // ─── AIM ─────────────────────────────────────────
         lockedTarget = null;
         let minAngle = Infinity;
         const isAiming = aimKeyDown();
@@ -1513,7 +1930,8 @@
         if (settings.aimbot && isAiming) {
             let bestTarget = null, bestDyaw = 0, bestDpitch = 0, bestScore = Infinity;
             for (const p of enemies) {
-                const pred = predict(p, eyePos.x, eyePos.y, eyePos.z, now);
+                const base = filterTargetPos(p, now);
+                const pred = predict(p, base, eyePos.x, eyePos.y, eyePos.z, now);
                 const dx = pred.x - eyePos.x;
                 const dz = pred.z - eyePos.z;
                 const distXZ = Math.sqrt(dx*dx + dz*dz);
@@ -1541,38 +1959,23 @@
 
             if (bestTarget) {
                 lockedTarget = bestTarget;
-
-                // Soft aim path (ramped + jitter, no smoothing multiply)
                 if (settings.softAim) {
                     const s = softAim(bestDyaw, bestDpitch);
-                    aimYawApplied = clamp(s.yaw, -settings.aimMaxVel * dt, settings.aimMaxVel * dt);
-                    aimPitchApplied = clamp(s.pitch, -settings.aimMaxVel * dt, settings.aimMaxVel * dt);
+                    aimYawApplied = clamp(s.yaw, -settings.aimMaxVel*dt, settings.aimMaxVel*dt);
+                    aimPitchApplied = clamp(s.pitch, -settings.aimMaxVel*dt, settings.aimMaxVel*dt);
                 } else {
-                    // Deadzone
-                    let dyaw = bestDyaw;
-                    let dpitch = bestDpitch;
+                    let dyaw = bestDyaw, dpitch = bestDpitch;
                     if (Math.abs(dyaw) < settings.aimDeadzone) dyaw = 0;
                     if (Math.abs(dpitch) < settings.aimDeadzone) dpitch = 0;
-
-                    // Exponential lerp toward target — dt-normalized.
-                    // smoothing is "how much of the remaining gap per 1/60s tick."
-                    // We express as time constant: tau = (1-smooth) scaled.
-                    // Higher smoothing value → snappier.
                     const smooth = clamp(settings.smoothing, 0.001, 1.0);
-                    const tau = (1 - smooth) * 0.35 + 0.02;   // seconds
+                    const tau = (1 - smooth) * 0.35 + 0.02;
                     const alpha = 1 - Math.exp(-dt / tau);
-                    // We want: apply the fraction that moves us alpha of the way.
-                    // Incremental delta = alpha * remaining_gap
-                    let dY = dyaw * alpha;
-                    let dP = dpitch * alpha;
-                    // Velocity cap
+                    let dY = dyaw * alpha, dP = dpitch * alpha;
                     const cap = settings.aimMaxVel * dt;
                     if (Math.abs(dY) > cap) dY = Math.sign(dY) * cap;
                     if (Math.abs(dP) > cap) dP = Math.sign(dP) * cap;
-                    aimYawApplied = dY;
-                    aimPitchApplied = dP;
+                    aimYawApplied = dY; aimPitchApplied = dP;
                 }
-
                 if (!settings.silentAim) {
                     myPlayer.rotation.y += aimYawApplied;
                     myPlayer.children[0].rotation.x = clamp(
@@ -1582,16 +1985,11 @@
                 }
             } else {
                 softState.ramp = 0; softState.lastT = null;
-                lastAimYawDelta = 0; lastAimPitchDelta = 0;
             }
-        } else {
-            softState.ramp = 0; softState.lastT = null;
-            lastAimYawDelta = 0; lastAimPitchDelta = 0;
-        }
-        lastAimYawDelta = aimYawApplied;
-        lastAimPitchDelta = aimPitchApplied;
+        } else { softState.ramp = 0; softState.lastT = null; }
+        lastAimYawDelta = aimYawApplied; lastAimPitchDelta = aimPitchApplied;
 
-        // ── anti-recoil (decoupled — subtracts our aim delta) ──
+        // ─── ANTI-RECOIL ─────────────────────────────────
         if (settings.antiRecoil) {
             const cp = myPlayer.children[0].rotation.x;
             const cy2 = myPlayer.rotation.y;
@@ -1602,9 +2000,8 @@
                 smooth: settings.recoilSmooth,
             });
             if (r) {
-                // Recoil comp is smooth already, but cap by dt too
-                const dP = clamp(r.dP, -settings.aimMaxVel * dt, settings.aimMaxVel * dt);
-                const dY = clamp(r.dY, -settings.aimMaxVel * dt, settings.aimMaxVel * dt);
+                const dP = clamp(r.dP, -settings.aimMaxVel*dt, settings.aimMaxVel*dt);
+                const dY = clamp(r.dY, -settings.aimMaxVel*dt, settings.aimMaxVel*dt);
                 myPlayer.children[0].rotation.x = clamp(
                     myPlayer.children[0].rotation.x + dP,
                     -settings.pitchMax, settings.pitchMax
@@ -1613,7 +2010,7 @@
             }
         }
 
-        // ── fire / wallbang ──
+        // ─── FIRE ────────────────────────────────────────
         const wb = lockedTarget && wallbangActive(lockedTarget);
         const rageFire = lockedTarget && settings.rageMode && minAngle < settings.aimFov * 1.6;
         const aligned = minAngle < 0.2;
@@ -1627,7 +2024,7 @@
             }
         } else burstCount = 0;
 
-        // ── ESP + skeleton ──
+        // ─── ESP ─────────────────────────────────────────
         if (settings.espEnabled) {
             if (settings.drawFov) {
                 ctx.beginPath();
@@ -1675,7 +2072,7 @@
                             const text = `${Math.round(dist)}m`;
                             ctx.font = "600 10px 'Inter','Segoe UI',sans-serif"; ctx.textAlign = 'center';
                             const tw = ctx.measureText(text).width;
-                            ctx.fillStyle = 'rgba(10,12,18,0.75)';
+                            ctx.fillStyle = 'rgba(8,10,16,0.78)';
                             ctx.fillRect(x - tw/2 - 5, top - 19, tw + 10, 16);
                             ctx.fillStyle = isW ? settings.wallbangColor : '#00e0c6';
                             ctx.fillText(text, x, top - 7);
@@ -1691,7 +2088,7 @@
                 const rc = radarCanvas.getContext('2d');
                 rc.clearRect(0, 0, size, size);
                 const cx = size/2, cy = size/2;
-                rc.fillStyle = 'rgba(10,12,18,0.6)'; rc.beginPath(); rc.arc(cx, cy, size/2, 0, PI2); rc.fill();
+                rc.fillStyle = 'rgba(8,10,16,0.6)'; rc.beginPath(); rc.arc(cx, cy, size/2, 0, PI2); rc.fill();
                 rc.strokeStyle = 'rgba(255,255,255,0.035)'; rc.lineWidth = 0.5;
                 for (let r = 1; r <= 3; r++) { rc.beginPath(); rc.arc(cx, cy, (r/3)*size/2, 0, PI2); rc.stroke(); }
                 rc.fillStyle = '#00e0c6'; rc.shadowColor = '#00e0c6'; rc.shadowBlur = 14;
@@ -1732,14 +2129,14 @@
         }
         const wp = document.getElementById('wbPill');
         if (wp) {
-            if (wb && lockedTarget) { wp.style.color = 'rgba(255,85,102,1)'; wp.style.background = 'rgba(255,85,102,0.18)'; }
-            else if (settings.wallBang) { wp.style.color = 'rgba(255,85,102,0.75)'; wp.style.background = 'rgba(255,85,102,0.10)'; }
+            if (wb && lockedTarget) { wp.style.color = 'rgba(255,85,102,1)'; wp.style.background = 'rgba(255,85,102,0.2)'; }
+            else if (settings.wallBang) { wp.style.color = 'rgba(255,85,102,0.8)'; wp.style.background = 'rgba(255,85,102,0.12)'; }
             else { wp.style.color = 'rgba(255,255,255,0.2)'; wp.style.background = 'rgba(255,255,255,0.03)'; }
         }
     }
 
     animate();
 
-    const _api = { settings, saveSettings, Recoil, ID };
+    const _api = { settings, saveSettings, resetSettings, exportSettings, importSettings, Recoil, applyPerf, findRenderer, ID };
     Object.defineProperty(window, 'a' + _salt, { value: _api, enumerable: false, configurable: false });
 })();
